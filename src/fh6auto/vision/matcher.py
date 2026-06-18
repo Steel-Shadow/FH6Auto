@@ -258,6 +258,46 @@ class ImageMatcherService:
         return text
 
     @staticmethod
+    def _has_driving_badge(card_bgr) -> bool:
+        if card_bgr is None or card_bgr.size == 0:
+            return False
+
+        card_h, card_w = card_bgr.shape[:2]
+        x1 = int(round(card_w * 0.80))
+        y1 = int(round(card_h * 0.60))
+        x2 = min(card_w, int(round(card_w * 0.99)))
+        y2 = min(card_h, int(round(card_h * 0.88)))
+        search = card_bgr[y1:y2, x1:x2]
+        if search.size == 0:
+            return False
+
+        hsv = cv2.cvtColor(search, cv2.COLOR_BGR2HSV)
+        green_mask = cv2.inRange(
+            hsv,
+            np.array([34, 180, 150], dtype=np.uint8),
+            np.array([42, 255, 255], dtype=np.uint8),
+        )
+        contours, _ = cv2.findContours(green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if w < max(8, int(card_w * 0.04)) or h < max(8, int(card_h * 0.05)):
+                continue
+            if w > card_w * 0.14 or h > card_h * 0.20:
+                continue
+
+            area = max(1, w * h)
+            green_ratio = np.count_nonzero(green_mask[y : y + h, x : x + w]) / area
+            if green_ratio < 0.55:
+                continue
+
+            badge_gray = cv2.cvtColor(search[y : y + h, x : x + w], cv2.COLOR_BGR2GRAY)
+            black_ratio = np.count_nonzero(badge_gray < 80) / area
+            if black_ratio >= 0.06:
+                return True
+
+        return False
+
+    @staticmethod
     def _tag_foreground_masks(img) -> list[np.ndarray]:
         if img is None or img.size == 0:
             return []
@@ -448,6 +488,7 @@ class ImageMatcherService:
         excluded_tag_path=None,
         required_tag_text=None,
         excluded_tag_text=None,
+        exclude_driving=False,
         min_score=0.75,
         tag_threshold=0.55,
         target: CarCardSpec | None = None,
@@ -470,6 +511,8 @@ class ImageMatcherService:
 
         for x, y, w, h in boxes:
             roi = screen_bgr[y : y + h, x : x + w]
+            if exclude_driving and self._has_driving_badge(roi):
+                continue
             card_texts = tuple(
                 text
                 for text in screen_texts
@@ -733,6 +776,7 @@ class ImageMatcherService:
         required_tag_path,
         excluded_tag_path,
         tag_threshold,
+        exclude_driving=False,
     ):
         ref_h, ref_w = template.shape[:2]
         candidates = []
@@ -741,6 +785,8 @@ class ImageMatcherService:
         for x, y, w, h in self._segment_car_card_boxes(screen_bgr):
             roi = screen_bgr[y : y + h, x : x + w]
             if roi.size == 0:
+                continue
+            if exclude_driving and self._has_driving_badge(roi):
                 continue
 
             normalized = cv2.resize(roi, (ref_w, ref_h), interpolation=cv2.INTER_AREA)
@@ -785,6 +831,7 @@ class ImageMatcherService:
         excluded_tag_path=None,
         required_tag_text=None,
         excluded_tag_text=None,
+        exclude_driving=False,
         region=None,
         fast_mode=True,
         candidate_threshold=0.50,
@@ -817,6 +864,7 @@ class ImageMatcherService:
                 excluded_tag_path=excluded_tag_path,
                 required_tag_text=required_tag_text,
                 excluded_tag_text=excluded_tag_text,
+                exclude_driving=exclude_driving,
                 min_score=max(0.75, min(float(final_threshold), 0.85)),
                 tag_threshold=min(float(tag_threshold), 0.55),
                 target=target_spec,
@@ -847,7 +895,9 @@ class ImageMatcherService:
                 return None
 
             sift_candidate = self._find_car_card_sift_candidate(card_path, screen_bgr, template_orig)
-            if sift_candidate is not None:
+            if sift_candidate is not None and not (
+                exclude_driving and self._has_driving_badge(sift_candidate["roi"])
+            ):
                 scores = self._car_card_candidate_scores(
                     sift_candidate["roi"],
                     template_orig,
@@ -891,6 +941,7 @@ class ImageMatcherService:
                     required_tag_path=required_tag_path,
                     excluded_tag_path=excluded_tag_path,
                     tag_threshold=tag_threshold,
+                    exclude_driving=exclude_driving,
                 )
                 for segment_candidate in segment_candidates:
                     scores = segment_candidate["scores"]
@@ -951,6 +1002,8 @@ class ImageMatcherService:
 
                     roi = screen_bgr[y : y + h, x : x + w]
                     if roi.shape[:2] != card_tpl.shape[:2]:
+                        continue
+                    if exclude_driving and self._has_driving_badge(roi):
                         continue
 
                     scores = self._car_card_candidate_scores(

@@ -101,6 +101,7 @@ class RemoveCarFlow:
             pos_target = self.app.services.image_waits.wait_for_car_card(
                 "removecarobject.png",
                 excluded_tag_text="全新",
+                exclude_driving=True,
                 region=self.app.services.game_window.regions["全界面"],
                 final_threshold=0.80,
                 title_threshold=0.74,
