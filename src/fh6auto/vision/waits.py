@@ -440,38 +440,81 @@ class ImageWaitsService:
             screen_bgr = self.app.services.image_cache.capture_region(region)
             boxes = self._find_menu_button_candidate_boxes(screen_bgr)
             best = None
-            for x, y, w, h in boxes:
-                roi = screen_bgr[y : y + h, x : x + w]
-                if roi.size == 0:
-                    continue
 
-                line_result = self.app.services.ocr.recognize_line(roi, min_score=0.25)
-                results = [line_result] if line_result is not None else self.app.services.ocr.read(roi, text_score=0.25)
+            def consider_result(result, box, *, require_ocr_box=False):
+                nonlocal best
+                matched = False
+                x, y, w, h = box
                 for target_text, target_norm in targets:
-                    for result in results:
-                        score = self._score_text_ocr_match(result.text, result.score, target_norm, threshold)
-                        if score is None:
-                            continue
+                    score = self._score_text_ocr_match(result.text, result.score, target_norm, threshold)
+                    if score is None:
+                        continue
+
+                    offset_x = x + (region[0] if region else 0)
+                    offset_y = y + (region[1] if region else 0)
+                    ocr_box = None
+                    if result.box:
+                        xs = [float(point[0]) + offset_x for point in result.box]
+                        ys = [float(point[1]) + offset_y for point in result.box]
+                        ocr_box = (
+                            int(round(min(xs))),
+                            int(round(min(ys))),
+                            int(round(max(xs))),
+                            int(round(max(ys))),
+                        )
+                        pos = ((ocr_box[0] + ocr_box[2]) // 2, (ocr_box[1] + ocr_box[3]) // 2)
+                    elif require_ocr_box:
+                        continue
+                    else:
                         pos = (
                             int(round(x + w / 2 + (region[0] if region else 0))),
                             int(round(y + h / 2 + (region[1] if region else 0))),
                         )
-                        if best is None or score > best["score"]:
-                            best = {
-                                "target": target_text,
-                                "text": result.text,
-                                "score": score,
-                                "pos": pos,
-                                "box": (x, y, w, h),
-                            }
+
+                    if best is None or score > best["score"]:
+                        best = {
+                            "target": target_text,
+                            "text": result.text,
+                            "score": score,
+                            "pos": pos,
+                            "box": box,
+                            "ocr_box": ocr_box,
+                        }
+                    matched = True
+                return matched
+
+            for x, y, w, h in boxes:
+                box = (x, y, w, h)
+                roi = screen_bgr[y : y + h, x : x + w]
+                if roi.size == 0:
+                    continue
+
+                candidate_too_tall = h > max(90, int(screen_bgr.shape[0] * 0.12))
+                if candidate_too_tall:
+                    for result in self.app.services.ocr.read(roi, text_score=0.25):
+                        consider_result(result, box, require_ocr_box=True)
+                    continue
+
+                matched = False
+                line_result = self.app.services.ocr.recognize_line(roi, min_score=0.25)
+                if line_result is not None:
+                    matched = consider_result(line_result, box)
+
+                if not matched:
+                    for result in self.app.services.ocr.read(roi, text_score=0.25):
+                        consider_result(result, box)
 
             if best and best["score"] >= threshold:
                 self.app.services.image_matcher.last_positions[best["target"]] = best["pos"]
                 x, y, w, h = best["box"]
+                ocr_box_text = ""
+                if best.get("ocr_box"):
+                    ox1, oy1, ox2, oy2 = best["ocr_box"]
+                    ocr_box_text = f" | OCR框: x1={ox1}, y1={oy1}, x2={ox2}, y2={oy2}"
                 self.app.log(
                     f"[MenuOCR] 命中: {best['text']} "
                     f"(目标:{best['target']}) | 分数:{best['score']:.3f} "
-                    f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}"
+                    f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}{ocr_box_text}"
                 )
                 return best["pos"]
 
