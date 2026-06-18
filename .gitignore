@@ -1,22 +1,38 @@
-# ========================
-# 1. 屏蔽所有 Python 源码
-# ========================
+/.venv/
+*.pdf
+test/
+.vscode/
+config.json
 
+*.egg-info
 
 # ========================
-# 2. 屏蔽本地配置文件和日志
+# 1. Python / editor caches
+# ========================
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+
+# ========================
+# 2. Local config and logs
 # ========================
 bot_config.json
 bot_log.txt
+*.log
 *.ahk
 
 # ========================
-# 3. 屏蔽打包的临时过程文件和内部资源
+# 3. Build output and generated runtime state
 # ========================
 build/
 obf_temp/
 *.spec
 dist/
+frontend/dist/
+frontend/node_modules/
 cache/
 other/
 oldversion/
@@ -24,9 +40,8 @@ bk/
 debug/
 
 # ========================
-# 4. 允许上传的内容（这部分不写，Git会自动识别）
+# 4. Tracked project assets
 # ========================
-# 我们要保留：
-# - dist/ 文件夹 (你的exe)
+# We intentionally keep:
 # - images/ 文件夹 (外部截图)
 # - version.json (你的更新文件)

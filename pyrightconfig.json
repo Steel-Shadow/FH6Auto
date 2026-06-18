@@ -1,0 +1,21 @@
+{
+    "include": [
+        "main.py",
+        "src"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        ".venv",
+        ".ruff_cache",
+        ".uv-cache",
+        "build",
+        "cache",
+        "dist"
+    ],
+    "pythonVersion": "3.14",
+    "typeCheckingMode": "basic",
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": "none",
+    "useLibraryCodeForTypes": true
+}
+

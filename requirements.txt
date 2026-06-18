@@ -1,4 +1,4 @@
-customtkinter
+fastapi
 opencv-python
 numpy
 pyautogui
@@ -7,3 +7,5 @@ requests
 pynput
 pillow
 pywin32
+pywebview
+uvicorn

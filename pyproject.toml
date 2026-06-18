@@ -1,0 +1,53 @@
+[project]
+name = "fh6auto"
+version = "1.1.6.3"
+description = "Desktop automation tool for Forza Horizon 6 menu workflows."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.124.4",
+    "ipykernel>=7.3.0",
+    "numpy>=2.4.6",
+    "nvidia-cuda-runtime>=13.3.29",
+    "nvidia-cudnn-cu13>=9.23.2.1",
+    "nvidia-cufft>=12.3.0.29",
+    "onnxruntime-gpu>=1.27.0",
+    "opencv-python>=4.13.0.92",
+    "packaging>=26.2",
+    "pandas>=3.0.3",
+    "pillow>=12.2.0",
+    "pyautogui>=0.9.54",
+    "pydirectinput>=1.0.4",
+    "pynput>=1.8.2",
+    "pywebview>=6.2.1",
+    "pywin32>=312",
+    "rapidocr>=3.8.4",
+    "requests>=2.34.2",
+    "uvicorn>=0.38.0",
+]
+
+[project.scripts]
+fh6auto-backend = "fh6auto.backend.api:run"
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# main.py intentionally runs the Windows/DPI bootstrap before importing native/runtime packages.
+ignore = ["E402"]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.21.0",
+    "ruff>=0.15.17",
+    "matplotlib>=3.11.0",
+    "pylint>=4.0.6",
+    "graphviz>=0.21",
+]

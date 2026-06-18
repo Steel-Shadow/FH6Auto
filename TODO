@@ -1,0 +1,12 @@
+实机测试移除车辆、超级抽奖和普通抽奖功能。
+设置技能点上限为999
+
+项目仍有少量灰度模板匹配：find_any_image_gray()
+目前主要还用于障碍物/特殊非文本目标，例如 recovery 里的 images/obstacles/*。这部分还没完全重构掉。考虑去除这部分。
+
+修改蓝图和汽车调教，100秒50技术点：
+<https://www.bilibili.com/video/BV1TwjN6NELh/?spm_id_from=333.337.search-card.all.click&vd_source=33502ae265ea913edb8d726fd5106c2a>
+
+OCR自动识别CR并计算买车数量
+
+同理，自动识别技能点
