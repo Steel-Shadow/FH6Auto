@@ -55,13 +55,16 @@ class AutoWheelspinFlow:
         text = self._read_footer_norm_text()
         if not text:
             return None
-        if "跳过" in text:
+        elif "跳过" in text:
             return "skip"
-        if "再次抽奖" in text:
+        elif "再次抽奖" in text:
             return "claim_again"
-        if "领取奖励" in text:
+        elif "领取奖励" in text:
             return "claim"
-        return None
+        elif "重置车辆位置" in text:
+            return "not_in_wheelspin"
+        else:
+            return None
 
     def _detect_owned_car_dialog(self) -> bool:
         try:
@@ -192,14 +195,18 @@ class AutoWheelspinFlow:
 
             state = self._detect_wheelspin_footer_state()
 
-            if state == "skip":
+            if state =="not_in_wheelspin":
+                self.app.log(f"未检测到不在{label}界面，终止{label}流程。")
+                return True
+
+            elif state == "skip":
                 self.app.log("检测到抽奖动画，可跳过，按 Enter。")
                 self.app.services.input_actions.hw_press("enter")
                 last_state_time = time.time()
                 time.sleep(1.0)
                 continue
 
-            if state == "claim_again":
+            elif state == "claim_again":
                 completed_count += 1
                 self.app.state.wheelspin_counter += 1
                 self._update_wheelspin_progress(progress_total)
@@ -218,7 +225,7 @@ class AutoWheelspinFlow:
                 time.sleep(1.5)
                 continue
 
-            if state == "claim":
+            elif state == "claim":
                 completed_count += 1
                 self.app.state.wheelspin_counter += 1
                 self._update_wheelspin_progress(progress_total)

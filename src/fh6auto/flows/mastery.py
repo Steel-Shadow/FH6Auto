@@ -11,54 +11,22 @@ class MasteryFlow:
     def __init__(self, app: BackendApp) -> None:
         self.app = app
 
-
-    def _find_vehicle_view_drive_prompt(self):
-        return self.app.services.image_waits.find_footer_text_ui(
-            "Space驾驶",
-            region=self.app.services.game_window.regions["下"],
-            threshold=0.50,
+    def _check_no_skill_points(self):
+        pos = self.app.services.image_matcher.find_image_sift(
+            "SPNE.png",
+            region=self.app.services.game_window.regions["全界面"],
+            min_inliers=24,
         )
-
-
-    def _wait_for_upgrade_menu_after_get_in(self, timeout: float = 45.0):
-        start = time.time()
-        last_escape_time = 0.0
-        vehicle_view_seen = False
-
-        while self.app.state.is_running and time.time() - start < timeout:
-            now = time.time()
-
-            if not vehicle_view_seen:
-                vehicle_view_ready = self._find_vehicle_view_drive_prompt()
-                if vehicle_view_ready:
-                    self.app.log("检测到车辆展示界面，返回车辆菜单...")
-                    vehicle_view_seen = True
-                    self.app.services.input_actions.hw_press("esc")
-                    last_escape_time = now
-                    time.sleep(1.0)
-                    continue
-
-                # 兜底：如果展示界面提示识别失败，不在动画刚开始时反复按 Esc，只做低频恢复尝试。
-                if now - start >= 18.0 and now - last_escape_time >= 8.0:
-                    self.app.log("等待车辆展示界面超时，尝试返回车辆菜单...")
-                    self.app.services.input_actions.hw_press("esc")
-                    vehicle_view_seen = True
-                    last_escape_time = now
-                time.sleep(0.5)
-                continue
-
-            pos_sjy = self.app.services.image_waits.find_menu_text_ui(
-                "升级与调校",
-                region=self.app.services.game_window.regions["左下"],
-                threshold=0.65,
-            )
-            if pos_sjy:
-                return pos_sjy
-
-            time.sleep(0.5)
-
-        return None
-
+        if pos:
+            self.app.log("不够购买额外加成 提前结束熟练度加点！")
+            self.app.services.input_actions.hw_press("enter")
+            time.sleep(0.8)
+            for _ in range(3):
+                self.app.services.input_actions.hw_press("esc")
+                time.sleep(1.0)
+            return True
+        else:
+            return False
 
     # ==========================================
     # --- 模块：熟练度加点 ---
@@ -95,17 +63,14 @@ class MasteryFlow:
         self.app.services.input_actions.game_click(pos_buycar)
         time.sleep(0.8)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(5)
+        time.sleep(1)
 
-        pos_bs = self.app.services.image_waits.wait_for_text_ui(
-            "购买与出售",
-            region=self.app.services.game_window.regions["左上"],
-            threshold=0.65,
-            timeout=60,
-            interval=0.5,
+        pos_bs = self.app.services.image_waits.wait_for_footer_text_ui(
+            "选择",
+            region=self.app.services.game_window.regions["下"],
         )
         if not pos_bs:
-            self.app.log("未找到购买与出售")
+            self.app.log("未找到 选择")
             return False
 
         self.app.services.input_actions.hw_press("pagedown", delay=0.15)
@@ -121,7 +86,9 @@ class MasteryFlow:
             self.app.services.input_actions.hw_press("backspace")
             time.sleep(1.0)
 
-            manufacturer_pos = self.app.services.image_waits.find_manufacturer_by_text("斯巴鲁", threshold=0.75, label="消耗品制造商")
+            manufacturer_pos = self.app.services.image_waits.scan_for_manufacturer_text(
+                "斯巴鲁", threshold=0.75, label="消耗品制造商"
+            )
             if not manufacturer_pos:
                 self.app.log("选择制造商失败")
                 return False
@@ -195,7 +162,24 @@ class MasteryFlow:
             time.sleep(1.0)
             self.app.services.input_actions.hw_press("enter")
 
-            pos_sjy = self._wait_for_upgrade_menu_after_get_in()
+            time.sleep(10.0)
+            pos_drive = self.app.services.image_waits.wait_for_footer_text_ui(
+                "驾驶",
+                region=self.app.services.game_window.regions["下"],
+                timeout=10,
+                interval=1.0,
+            )
+            if not pos_drive:
+                self.app.log("上新车后的检视，底部未找到“驾驶”")
+                return False
+
+            self.app.services.input_actions.hw_press("esc")
+            time.sleep(1.0)
+
+            pos_sjy = self.app.services.image_waits.wait_for_menu_text_ui(
+                "升级与调校",
+                region=self.app.services.game_window.regions["左下"],
+            )
             if not pos_sjy:
                 self.app.log("找不到升级页面")
                 return False
@@ -205,29 +189,25 @@ class MasteryFlow:
             pos_mastery = self.app.services.image_waits.wait_for_menu_text_ui(
                 "车辆专精",
                 region=self.app.services.game_window.regions["左下"],
-                threshold=0.65,
-                timeout=20,
-                interval=0.3,
             )
             if not pos_mastery:
                 self.app.log("未找到车辆专精")
                 return False
             self.app.services.input_actions.game_click(pos_mastery)
+            time.sleep(1.0)
 
-            pos_exp = self.app.services.image_waits.wait_for_image_sift(
+            pos_exp = self.app.services.image_matcher.find_image_sift(
                 "EXPwU.png",
                 region=self.app.services.game_window.regions["左"],
                 min_inliers=8,
-                timeout=1.5,
-                interval=0.3,
             )
-
             if pos_exp:
                 self.app.log("该车辆技能已点过，跳过计数")
             else:
-                time.sleep(1.0)
                 self.app.services.input_actions.hw_press("enter")
-                time.sleep(1.5)
+                time.sleep(1.2)
+                if self._check_no_skill_points():
+                    return True
 
                 for dk in self.app.services.config.values["skill_dirs"]:
                     if not self.app.state.is_running:
@@ -236,25 +216,9 @@ class MasteryFlow:
                     time.sleep(0.2)
                     self.app.services.input_actions.hw_press("enter")
                     time.sleep(1.2)
+                    if self._check_no_skill_points():
+                        return True
 
-                spne_found = self.app.services.image_matcher.find_image_sift(
-                    "SPNE.png",
-                    region=self.app.services.game_window.regions["全界面"],
-                    min_inliers=24,
-                )
-
-                if spne_found:
-                    self.app.log("已无技能点或技能已点完，提前结束熟练度加点！")
-                    time.sleep(1.0)
-                    self.app.services.input_actions.hw_press("enter")
-                    time.sleep(0.8)
-                    self.app.services.input_actions.hw_press("esc")
-                    time.sleep(1.0)
-                    self.app.services.input_actions.hw_press("esc")
-                    time.sleep(1.0)
-                    self.app.services.input_actions.hw_press("esc")
-                    time.sleep(1.0)
-                    return True
                 self.app.state.mastery_counter += 1
                 self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, target_count)
 

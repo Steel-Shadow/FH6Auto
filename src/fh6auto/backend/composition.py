@@ -25,8 +25,8 @@ class AppServices:
         self.runtime = BackendRuntimeService(app)
         self.recovery = RecoveryService(app)
         self.image_cache = ImageCacheService(app)
-        self.image_matcher = ImageMatcherService(app)
         self.ocr = OcrService(app)
+        self.image_matcher = ImageMatcherService(app)
         self.image_waits = ImageWaitsService(app)
 
 

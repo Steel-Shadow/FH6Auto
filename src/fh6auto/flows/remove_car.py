@@ -42,16 +42,14 @@ class RemoveCarFlow:
         self.app.services.input_actions.move_to_game_coord(5, 5)
         time.sleep(0.8)
         self.app.services.input_actions.hw_press("enter")
-
         time.sleep(1)
-        pos_bs = self.app.services.image_waits.wait_for_text_ui(
-            "购买与出售",
-            self.app.services.game_window.regions["左上"],
-            timeout=10,
-            interval=1,
+
+        pos_bs = self.app.services.image_waits.wait_for_footer_text_ui(
+            "选择",
+            region=self.app.services.game_window.regions["下"],
         )
         if not pos_bs:
-            self.app.log("未找到购买与出售")
+            self.app.log("未找到 选择")
             return False
 
         # 进入“我的车辆”
@@ -64,23 +62,25 @@ class RemoveCarFlow:
         self.app.services.input_actions.hw_press("y")
         time.sleep(1.0)
 
-        # TODO: find_text_ui 不应该在 ImageWaitsService，语义上不符合，应该放在 ImageMatcherService 或其它地方
-        pos_repeat = self.app.services.image_waits.find_menu_text_ui("重复项")
+        pos_repeat = self.app.services.image_waits.wait_for_menu_text_ui(
+            "重复项",
+            region=self.app.services.game_window.regions["全界面"],
+            timeout=1.0,
+        )
 
-        if pos_repeat:
-            self.app.services.input_actions.game_click(pos_repeat)
-        else:
-            # log： 未找到重复项
+        if not pos_repeat:
             self.app.log("未找到重复项")
             return False
 
+        self.app.services.input_actions.game_click(pos_repeat)
         time.sleep(0.5)
         self.app.services.input_actions.hw_press("esc")
+        time.sleep(0.5)
 
         # 切换到消耗品制造商
         self.app.log("切换到消耗品制造商...")
         self.app.services.input_actions.hw_press("backspace")
-        manufacturer_pos = self.app.services.image_waits.find_manufacturer_by_text(
+        manufacturer_pos = self.app.services.image_waits.scan_for_manufacturer_text(
             "斯巴鲁", threshold=0.75, label="消耗品制造商"
         )
         if not manufacturer_pos:
@@ -115,7 +115,7 @@ class RemoveCarFlow:
             if not pos_target:
                 not_found_pages += 1
                 if not_found_pages >= 5:
-                    self.app.log("=连续翻找 5 页仍未搜索到目标车辆！视为车辆已全部清理完毕。")
+                    self.app.log("连续翻找 5 页仍未搜索到目标车辆！视为车辆已全部清理完毕。")
                     self.app.log("主动结束清理任务，准备进入下一步骤...")
                     break  # 直接跳出循环，结束当前任务
 
@@ -130,15 +130,20 @@ class RemoveCarFlow:
 
             self.app.log("精准锁定目标车辆，执行点击...")
             self.app.services.input_actions.game_click(pos_target)
-            time.sleep(1.2)  # 等待点击后的反应
+            time.sleep(1.0)  # 等待点击后的反应
 
-            # ==========================================
-            # 核心逻辑：寻找“从车库移除车辆”菜单项
-            # ==========================================
+            # 若该车在点击前已经被选中，则会直接弹出“选择操作”菜单，否则会将列表车辆列表先滑动到指定位置
+            pos_cancel = self.app.services.ocr.find_footer_text_ui("取消")
+            if not pos_cancel:
+                self.app.services.input_actions.hw_press("enter")
+                time.sleep(1.0)  # 等待点击后的反应
+
             self.app.log("寻找 '从车库移除车辆' 按钮...")
-            pos_remove = self.app.services.image_waits.find_text_ui(
-                "从车库移除车辆",
+            pos_remove = self.app.services.image_waits.wait_for_any_text_ui(
+                ["从车库移除车辆"],
                 region=self.app.services.game_window.regions["全界面"],
+                timeout=3.0,
+                interval=0.3,
             )
 
             if pos_remove:

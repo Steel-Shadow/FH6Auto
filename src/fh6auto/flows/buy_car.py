@@ -70,7 +70,11 @@ class BuyCarFlow:
         self.app.services.input_actions.hw_press("backspace")
         time.sleep(0.5)
 
-        manufacturer_pos = self.app.services.image_waits.find_manufacturer_by_text("斯巴鲁", threshold=0.75, label="消耗品制造商")
+        manufacturer_pos = self.app.services.image_waits.scan_for_manufacturer_text(
+            "斯巴鲁",
+            threshold=0.75,
+            label="消耗品制造商",
+        )
         if not manufacturer_pos:
             self.app.log("未找到制造商")
             return False
@@ -127,4 +131,3 @@ class BuyCarFlow:
             time.sleep(0.8)
 
         return True
-

@@ -1,7 +1,24 @@
-实机测试移除车辆、超级抽奖和普通抽奖功能。
+修改Carcard的选择顺序，先竖着选。
+
+进行一次完整流程，检查有哪些函数没有调用，覆盖率分析？然后清除无用的函数，清理代码。
+
+解决以下问题，ocr wait导致卡顿
+
+ImageWaitsService与ImageMatcherService的统一
+
+```txt
+[18:05:02] 进入车辆与收藏！！！使用前请人工核验到正常移除车辆再进行自动化移除处理
+[18:05:03] [SIFTMatch] 命中: buy_new_used_cars.png | 内点: 153/158 (阈值 20) | 估算缩放: 1.625
+[18:05:07] OCR 引擎已初始化，text_det=['CUDAExecutionProvider', 'CPUExecutionProvider'], text_cls=['CUDAExecutionProvider', 'CPUExecutionProvider'], text_rec=['CUDAExecutionProvider', 'CPUExecutionProvider']。
+[WARNING] 2026-06-18 18:05:09,208 [RapidOCR] main.py:132: The text detection result is empty
+[WARNING] 2026-06-18 18:05:09,368 [RapidOCR] main.py:132: The text detection result is empty
+[WARNING] 2026-06-18 18:05:09,512 [RapidOCR] main.py:132: The text detection result is empty
+```
+
+log分级，或许使用框架？
+
 设置技能点上限为999
 
-项目仍有少量灰度模板匹配：find_any_image_gray()
 目前主要还用于障碍物/特殊非文本目标，例如 recovery 里的 images/obstacles/*。这部分还没完全重构掉。考虑去除这部分。
 
 修改蓝图和汽车调教，100秒50技术点：

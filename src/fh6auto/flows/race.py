@@ -26,7 +26,6 @@ class RaceFlow:
     def __init__(self, app: BackendApp) -> None:
         self.app = app
 
-
     # ==========================================
     # --- 模块：跑图前置与循环跑图 ---
     # ==========================================
@@ -34,11 +33,9 @@ class RaceFlow:
         return self.app.services.image_waits.wait_for_footer_text_ui(
             "查看赛事信息",
             region=self.app.services.game_window.regions["下"],
-            threshold=0.70,
             timeout=timeout,
             interval=1.0,
         )
-
 
     def _wait_for_race_car(self, timeout: float = 2.0):
         return self.app.services.image_waits.wait_for_car_card(
@@ -56,7 +53,6 @@ class RaceFlow:
             tag_threshold=self.RACE_CAR_MATCH_PARAMS["tag_threshold"],
         )
 
-
     def _wait_for_race_start_button(self, timeout: float = 0.7):
         return self.app.services.image_waits.wait_for_image_sift(
             "start.png",
@@ -66,10 +62,10 @@ class RaceFlow:
             interval=0.2,
         )
 
-
     def _find_race_result_screen(self):
-        return self.app.services.image_matcher.find_race_result_table(region=self.app.services.game_window.regions["全界面"])
-
+        return self.app.services.image_matcher.find_race_result_table(
+            region=self.app.services.game_window.regions["全界面"]
+        )
 
     def _find_like_author_prompt(self):
         return self.app.services.image_matcher.find_any_image_sift(
@@ -77,7 +73,6 @@ class RaceFlow:
             region=self.app.services.game_window.regions["中间"],
             min_inliers=18,
         )
-
 
     def _restart_timed_out_race(self) -> None:
         time.sleep(0.5)
@@ -116,7 +111,6 @@ class RaceFlow:
         self.app.services.input_actions.hw_press("enter")
         time.sleep(4.0)
 
-
     def _select_event_by_share_code(self) -> bool:
         self.app.services.input_actions.hw_press("backspace")
         time.sleep(0.8)
@@ -146,7 +140,6 @@ class RaceFlow:
 
         self.app.log("链接超时")
         return False
-
 
     def logic_race(self, target_count):
         if self.app.state.race_counter >= target_count:
@@ -209,30 +202,17 @@ class RaceFlow:
             self.app.services.input_actions.hw_press("backspace")
             time.sleep(1.2)
 
-            found_brand = False
-            for _ in range(3):
-                if not self.app.state.is_running:
-                    return False
-
-                pos_brand = self.app.services.image_waits.wait_for_manufacturer_text(
-                    "斯巴鲁",
-                    region=self.app.services.game_window.regions["全界面"],
-                    threshold=0.75,
-                    timeout=1.2,
-                    interval=0.2,
-                )
-                if pos_brand:
-                    self.app.services.input_actions.game_click(pos_brand)
-                    time.sleep(1.2)
-                    found_brand = True
-                    break
-
-                self.app.services.input_actions.hw_press("up")
-                time.sleep(0.4)
-
-            if not found_brand:
-                self.app.log("三次尝试未找到刷图车辆制造商。")
+            pos_brand = self.app.services.image_waits.scan_for_manufacturer_text(
+                "斯巴鲁",
+                threshold=0.75,
+                label="刷图车辆制造商",
+            )
+            if not pos_brand:
+                self.app.log("未找到刷图车辆制造商。")
                 return False
+
+            self.app.services.input_actions.game_click(pos_brand)
+            time.sleep(1.2)
 
             for _ in range(20):
                 if not self.app.state.is_running:
@@ -376,4 +356,3 @@ class RaceFlow:
             self.app.state.set_task("循环跑图", self.app.state.race_counter, target_count)
 
         return True
-

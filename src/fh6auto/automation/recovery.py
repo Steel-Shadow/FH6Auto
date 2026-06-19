@@ -84,10 +84,8 @@ class RecoveryService:
             # ==============================
             # 只有在通过了画面1的前提下，才去寻找画面2
             if passed_screen_1:
-                pos_continue = self.app.services.image_waits.find_text_ui(
-                    "继续",
-                    threshold=0.65,
-                    fast_mode=True,
+                pos_continue = self.app.services.ocr.find_any_text_ui(
+                    ["继续"],
                 )
                 if pos_continue:
                     self.app.log("识别到 画面2 (继续按钮)，进行点击...")
@@ -168,21 +166,6 @@ class RecoveryService:
             # 游戏没开或者进程没了，直接走重启流程
             if not self.restart_game_and_boot():
                 return False
-        else:
-            # TODO: 停止运行会直接在这里杀死游戏进程，回顾这里的问题
-            pass
-            # 进程还在，使用【高级状态机】尝试动态退回
-            # if not self.advanced_enter_menu():
-            #     self.app.log("高级动态退回失败(可能游戏卡死或致命报错)，准备强杀进程并重启...")
-            #     try:
-            #         os.system("taskkill /F /IM forzahorizon6.exe /T")
-            #         time.sleep(4)
-            #     except Exception:
-            #         pass
-
-            #     # 杀进程后重新拉起
-            #     if not self.restart_game_and_boot():
-            #         return False
         self.app.log("环境重置成功！即将从中断处继续剩余任务。")
         return True
 
@@ -193,11 +176,9 @@ class RecoveryService:
             if not self.app.state.is_running:
                 return False
 
-            if self.app.services.image_waits.find_text_ui(
-                "安娜",
+            if self.app.services.ocr.find_any_text_ui(
+                ["安娜"],
                 region=self.app.services.game_window.regions["左下"],
-                threshold=0.65,
-                fast_mode=True,
             ):
                 self.app.log("验证成功：已确认处于游戏漫游界面。")
                 return True
@@ -252,87 +233,3 @@ class RecoveryService:
 
         self.app.log("60 次尝试均未进入菜单，请检查游戏状态。")
         return False
-
-
-    def advanced_enter_menu(self):
-        """
-        高级状态机退回：专门用于故障恢复。
-        能够识别中途的特定弹窗、中间过渡画面，并执行点击，没找到目标才按 ESC。
-        """
-        self.app.log("正在使用【高级恢复模式】尝试退回主菜单...")
-
-        # ==========================================
-        # 动态读取 images/obstacles/ 里的所有图片
-        # ==========================================
-        obstacles_dir = os.path.join("images", "obstacles")
-        dynamic_obstacles = []
-
-        # 检查文件夹是否存在
-        if os.path.exists(obstacles_dir):
-            for file in os.listdir(obstacles_dir):
-                # 只要是 png 或 jpg 格式的图片，统统加进来
-                if file.lower().endswith((".png", ".jpg", ".jpeg")):
-                    # 拼成 "obstacles/文件名.png"，这样 find_any_image_gray 就能正确找到路径
-                    dynamic_obstacles.append(f"obstacles/{file}")
-
-        if not dynamic_obstacles:
-            self.app.log("提示：images/obstacles/ 文件夹为空或不存在，将只使用 ESC 退回。")
-        # 连续尝试 80 次，处理较长的随机过程
-        for i in range(80):
-            if hasattr(self.app, "check_pause"):
-                self.app.services.runtime.check_pause()  # 配合暂停功能
-            if not self.app.state.is_running:
-                return False
-
-            # 1. 终极判断：是不是已经在菜单了？
-            if self.is_in_menu():
-                self.app.log(f"成功定位到菜单锚点！(尝试次数: {i + 1})")
-                time.sleep(0.5)
-                return True
-
-            # 2. 致命错误排查 (检测到显存不足，强制休息 10 分钟)
-            if self.app.services.image_waits.find_text_ui(
-                "显存不足",
-                region=self.app.services.game_window.regions["全界面"],
-                threshold=0.65,
-                fast_mode=True,
-            ):
-                self.app.log("!!! 严重警告: 检测到显存不足 (VRAMNE.png) 报错！")
-                self.app.log("2秒后强杀游戏，随后冷却 10 分钟...")
-                time.sleep(2.0)
-                try:
-                    os.system("taskkill /F /IM forzahorizon6.exe /T")
-                    self.app.log("已强杀 forzahorizon6.exe")
-                except Exception as e:
-                    self.app.log(f"强杀游戏失败: {e}")
-                    return False
-                for _ in range(600):
-                    if hasattr(self.app, "check_pause"):
-                        self.app.services.runtime.check_pause()
-                    if not self.app.state.is_running:
-                        return False
-                    time.sleep(1)
-                self.app.log("10 分钟冷却完毕，交给外层执行重启流程。")
-                return False
-
-            # 3. 动态扫描所有可能的弹窗 / 需要点击的中间图片
-            pos_obs = self.app.services.image_waits.find_any_image_gray(
-                dynamic_obstacles,
-                region=self.app.services.game_window.regions["全界面"],
-                threshold=0.75,
-                fast_mode=True,
-            )
-            if pos_obs:
-                self.app.log(f"退回途中检测到已知图片/弹窗，点击推进... ({i + 1}/80)")
-                self.app.services.input_actions.game_click(pos_obs)
-                time.sleep(1.5)  # 给画面跳转留出动画时间
-                continue  # 点击后，跳过本轮，不要按 ESC
-
-            # 4. 如果既没进菜单，也没看到特定的图片，说明处于常规界面，按 ESC 退回
-            self.app.log(f"未在主菜单且无已知特定图片，按下 ESC... ({i + 1}/80)")
-            self.app.services.input_actions.hw_press("esc")
-            time.sleep(1.2)  # 给游戏一点动画加载时间
-
-        self.app.log("80 次动态尝试均未进入菜单，高级退回失败。")
-        return False
-
