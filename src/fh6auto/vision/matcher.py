@@ -152,6 +152,11 @@ class ImageMatcherService:
                 clusters[-1].append(value)
         return [int(round(sum(cluster) / len(cluster))) for cluster in clusters]
 
+    @staticmethod
+    def _car_card_column_order(x, y, score=0.0):
+        """车辆卡片按列优先：同一列从上到下，再移动到右侧下一列。"""
+        return (float(x), float(y), -float(score))
+
     def _segment_car_card_boxes(self, screen_bgr):
         screen_h, screen_w = screen_bgr.shape[:2]
         gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
@@ -190,8 +195,8 @@ class ImageMatcherService:
             if len(x_positions) >= 2 and len(y_positions) >= 2:
                 grid_boxes = []
                 seen = set()
-                for y in y_positions:
-                    for x in x_positions:
+                for x in x_positions:
+                    for y in y_positions:
                         box = (
                             max(0, x),
                             max(0, y),
@@ -205,7 +210,7 @@ class ImageMatcherService:
                 if grid_boxes:
                     boxes = grid_boxes
 
-        boxes.sort(key=lambda item: (item[1], item[0], -item[2] * item[3]))
+        boxes.sort(key=lambda item: self._car_card_column_order(item[0], item[1], item[2] * item[3]))
         deduped = []
         for box in boxes:
             x, y, w, h = box
@@ -612,7 +617,13 @@ class ImageMatcherService:
                     )
                 )
 
-        candidates.sort(key=lambda item: (-item.score, item.box[1], item.box[0]))
+        candidates.sort(
+            key=lambda item: self._car_card_column_order(
+                item.box[0],
+                item.box[1],
+                item.score,
+            )
+        )
         return candidates
 
     def _match_region_score(self, roi, template, template_rect, search_rect=None, mode="color"):
@@ -784,7 +795,10 @@ class ImageMatcherService:
         return {
             "roi": roi,
             "pos": (int(round(center_x)), int(round(center_y))),
-            "sort_key": (float(projected[:, 1].min()), float(projected[:, 0].min())),
+            "sort_key": (
+                float(projected[:, 0].min()),
+                float(projected[:, 1].min()),
+            ),
             "scale": result["scale"],
             "inliers": result["inliers"],
             "good": result["good"],
@@ -876,7 +890,7 @@ class ImageMatcherService:
                 {
                     "pos": (int(x + w // 2), int(y + h // 2)),
                     "scores": scores,
-                    "sort_key": (y, x),
+                    "sort_key": (x, y),
                     "method": "segment",
                 }
             )
@@ -1103,7 +1117,7 @@ class ImageMatcherService:
                                 int(y + h // 2 + (region[1] if region else 0)),
                             ),
                             "scores": scores,
-                            "sort_key": (y, x),
+                            "sort_key": (x, y),
                             "method": "template",
                         }
                     )
@@ -1111,8 +1125,14 @@ class ImageMatcherService:
             if not candidates:
                 return None
 
-            # 同一页可能有多个同款目标车，按视觉顺序取左上第一个，便于连续处理。
-            candidates.sort(key=lambda item: (-item["scores"]["final"], item["sort_key"][0], item["sort_key"][1]))
+            # 同一页有多个目标时，先处理最左列并在列内从上到下，减少横向翻页。
+            candidates.sort(
+                key=lambda item: self._car_card_column_order(
+                    item["sort_key"][0],
+                    item["sort_key"][1],
+                    item["scores"]["final"],
+                )
+            )
             best = candidates[0]
             scores = best["scores"]
             self.last_positions[card_path] = best["pos"]
