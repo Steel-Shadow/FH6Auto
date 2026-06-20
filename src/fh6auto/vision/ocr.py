@@ -4,6 +4,7 @@ import gc
 import os
 import re
 import threading
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -128,6 +129,25 @@ class OcrService:
         normalized = re.sub(r"[\s·・.\-_—:：/\\|]+", "", normalized)
         normalized = re.sub(r"[，,。!！?？（）()\[\]【】]+", "", normalized)
         return normalized
+
+    @staticmethod
+    def parse_credit_value(text: str) -> int | None:
+        """从 OCR 文本中提取 CR 金额，优先解析“出售价格”之后的数字。"""
+        normalized = unicodedata.normalize("NFKC", str(text)).upper()
+        label = re.search(r"出售\s*价格|出售价|售\s*价格|价格", normalized)
+        if label:
+            normalized = normalized[label.end() :]
+        elif "CR" in normalized:
+            normalized = normalized[normalized.find("CR") + 2 :]
+        else:
+            return None
+
+        match = re.search(r"(?:CR)?[^0-9]*([0-9][0-9\s,，.]*[0-9]|[0-9])", normalized)
+        if not match:
+            return None
+
+        digits = re.sub(r"\D", "", match.group(1))
+        return int(digits) if digits else None
 
     def read(self, img: np.ndarray | str | Path, *, use_det=True, use_cls=True, text_score=0.5) -> list[OcrText]:
         with self._lock:
@@ -462,6 +482,31 @@ class OcrService:
             self.app.log(f"find_any_text_ui 异常: {e}")
             return None
 
+    def find_sell_price_value(self, region=None, threshold=0.25) -> int | None:
+        """识别重复车辆弹窗里的“出售价格：CR x”。"""
+        if not self.app.state.is_running:
+            return None
+        try:
+            screen_bgr = self.app.services.image_cache.capture_region(region)
+            if screen_bgr.size == 0:
+                return None
+
+            results = sorted(
+                (result for result in self.read(screen_bgr, text_score=threshold) if result.score >= threshold),
+                key=lambda result: (
+                    min((point[1] for point in result.box), default=0) if result.box else 0,
+                    min((point[0] for point in result.box), default=0) if result.box else 0,
+                ),
+            )
+            combined_text = "".join(result.text for result in results)
+            value = self.parse_credit_value(combined_text)
+            if value is not None:
+                self.app.log(f"[PriceOCR] 出售价格: CR {value:,} | OCR: {combined_text}")
+            return value
+        except Exception as e:
+            self.app.log(f"find_sell_price_value 异常: {e}")
+            return None
+
     def _find_menu_button_candidate_boxes(self, screen_bgr, max_candidates=16):
         """用按钮背景/选中边框定位左侧菜单行，再交给 OCR 识别文字。"""
         if screen_bgr is None or screen_bgr.size == 0:
@@ -597,40 +642,7 @@ class OcrService:
         sx, sy, sw, sh = map(int, region)
         bottom_y = sy + int(sh * 0.80)
         bottom_h = max(1, sh - int(sh * 0.80))
-        right_x = sx + int(sw * 0.45)
-        right_w = max(1, sw - int(sw * 0.45))
-        return [
-            ("右下提示栏", (right_x, bottom_y, right_w, bottom_h)),
-            ("底部提示栏", (sx, bottom_y, sw, bottom_h)),
-        ]
-
-    def _footer_ocr_candidates(self, results, offset_x, offset_y, max_window=4):
-        ordered = sorted(
-            (result for result in results if result is not None and self.normalize_text(result.text)),
-            key=lambda result: (
-                min((point[1] for point in result.box), default=0) if result.box else 0,
-                min((point[0] for point in result.box), default=0) if result.box else 0,
-            ),
-        )
-        candidates = []
-        for start in range(len(ordered)):
-            for end in range(start, min(len(ordered), start + max_window)):
-                window = ordered[start : end + 1]
-                text = "".join(result.text for result in window)
-                score = min(float(result.score) for result in window)
-                boxes = [result.box for result in window if result.box]
-                if boxes:
-                    box = self._point_bounds(
-                        [point for result_box in boxes for point in result_box],
-                        offset_x=offset_x,
-                        offset_y=offset_y,
-                    )
-                    pos = self._bounds_center(box) if box is not None else None
-                else:
-                    box = None
-                    pos = None
-                candidates.append((text, score, pos, box))
-        return candidates
+        return [("底部提示栏", (sx, bottom_y, sw, bottom_h))]
 
     def find_footer_text_ui(self, target_text, region=None, threshold=0.65):
         """在当前画面的底部按键提示栏中定位目标文字。"""
@@ -649,21 +661,34 @@ class OcrService:
 
                 results = self.read(roi_bgr, text_score=max(0.25, threshold - 0.45))
                 best = None
-                candidates = self._footer_ocr_candidates(results, rx, ry)
                 fallback_pos = (int(rx + rw / 2), int(ry + rh / 2))
-                for text, candidate_score, candidate_pos, candidate_box in candidates:
-                    candidate = self._match_text_candidate(
-                        text,
-                        candidate_score,
-                        targets,
-                        threshold,
-                        pos=candidate_pos or fallback_pos,
-                        ocr_box=candidate_box,
-                        region_name=roi_name,
-                        allow_candidate_subset=False,
-                        coverage_floor=0.82,
-                    )
-                    best = self._better_match(best, candidate)
+                for result in results:
+                    if result is None:
+                        continue
+
+                    candidate_norm = self.normalize_text(result.text)
+                    if not candidate_norm:
+                        continue
+
+                    score = float(result.score)
+                    if score < threshold:
+                        continue
+
+                    box = self._point_bounds(result.box, offset_x=rx, offset_y=ry) if result.box else None
+                    pos = self._bounds_center(box) if box is not None else fallback_pos
+                    for target_text, target_norm in targets:
+                        if target_norm not in candidate_norm:
+                            continue
+
+                        candidate = _TextMatch(
+                            target=target_text,
+                            text=result.text,
+                            score=score,
+                            pos=pos,
+                            ocr_box=box,
+                            region_name=roi_name,
+                        )
+                        best = self._better_match(best, candidate)
 
                 if best is not None:
                     box_text = f" | OCR框: {best.ocr_box}" if best.ocr_box else ""

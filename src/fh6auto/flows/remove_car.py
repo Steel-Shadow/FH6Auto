@@ -130,19 +130,25 @@ class RemoveCarFlow:
 
             self.app.log("精准锁定目标车辆，执行点击...")
             self.app.services.input_actions.game_click(pos_target)
-            time.sleep(1.0)  # 等待点击后的反应
+            time.sleep(1.5)  # 等待点击后的反应
 
             # 若该车在点击前已经被选中，则会直接弹出“选择操作”菜单，否则会将列表车辆列表先滑动到指定位置
             pos_cancel = self.app.services.ocr.find_footer_text_ui("取消")
             if not pos_cancel:
                 self.app.services.input_actions.hw_press("enter")
-                time.sleep(1.0)  # 等待点击后的反应
 
+            window_x, window_y, window_w, window_h = self.app.services.game_window.regions["全界面"]
+            operation_menu_region = (
+                window_x + int(window_w * 0.30),
+                window_y + int(window_h * 0.34),
+                int(window_w * 0.40),
+                int(window_h * 0.36),
+            )
             self.app.log("寻找 '从车库移除车辆' 按钮...")
             pos_remove = self.app.services.image_waits.wait_for_any_text_ui(
                 ["从车库移除车辆"],
-                region=self.app.services.game_window.regions["全界面"],
-                timeout=3.0,
+                region=operation_menu_region,
+                timeout=5.0,
                 interval=0.3,
             )
 

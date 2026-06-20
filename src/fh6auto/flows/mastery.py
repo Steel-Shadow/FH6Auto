@@ -68,6 +68,8 @@ class MasteryFlow:
         pos_bs = self.app.services.image_waits.wait_for_footer_text_ui(
             "选择",
             region=self.app.services.game_window.regions["下"],
+            timeout=3.0,
+            interval=0.3,
         )
         if not pos_bs:
             self.app.log("未找到 选择")

@@ -13,6 +13,7 @@ NORMAL_WHEELSPIN_REFERENCE = "wheelspin.png"
 SUPER_WHEELSPIN_REFERENCE = "superwheelspin.png"
 NORMAL_DUPLICATE_POPUP_LIMIT = 1
 SUPER_DUPLICATE_POPUP_LIMIT = 3
+OWNED_CAR_SELL_THRESHOLD = 100_000
 
 
 class AutoWheelspinFlow:
@@ -68,7 +69,10 @@ class AutoWheelspinFlow:
 
     def _detect_owned_car_dialog(self) -> bool:
         try:
-            results = self.app.services.ocr.read(self.app.services.image_cache.capture_region(self._dialog_region()), text_score=0.25)
+            results = self.app.services.ocr.read(
+                self.app.services.image_cache.capture_region(self._dialog_region()),
+                text_score=0.25,
+            )
         except Exception as e:
             self.app.log(f"读取重复车辆弹窗失败: {e}")
             return False
@@ -80,12 +84,38 @@ class AutoWheelspinFlow:
         )
         return "已拥有车辆" in text or "添加至车库" in text
 
+    def _read_owned_car_sell_price(self, timeout: float = 1.5) -> int | None:
+        deadline = time.time() + max(0.0, timeout)
+        while self.app.state.is_running and time.time() < deadline:
+            price = self.app.services.ocr.find_sell_price_value(
+                region=self._dialog_region(),
+                threshold=0.25,
+            )
+            if price is not None:
+                return price
+            time.sleep(0.25)
+        return None
+
+    def _sell_owned_car(self) -> None:
+        for _ in range(2):
+            self.app.services.input_actions.hw_press("down", delay=0.08)
+            time.sleep(0.15)
+        self.app.services.input_actions.hw_press("enter")
+
     def _handle_owned_car_dialog(self, label: str) -> bool:
         if not self._detect_owned_car_dialog():
             return False
 
-        self.app.log(f"检测到{label}重复车辆弹窗，选择添加至车库。")
-        self.app.services.input_actions.hw_press("enter")
+        price = self._read_owned_car_sell_price()
+        if price is not None and price < OWNED_CAR_SELL_THRESHOLD:
+            self.app.log(f"检测到{label}重复车辆，出售价格 CR {price:,}，低于 CR 100,000，选择出售。")
+            self._sell_owned_car()
+        else:
+            if price is None:
+                self.app.log(f"检测到{label}重复车辆弹窗，但未识别到出售价格，保守选择添加至车库。")
+            else:
+                self.app.log(f"检测到{label}重复车辆，出售价格 CR {price:,}，选择添加至车库。")
+            self.app.services.input_actions.hw_press("enter")
         time.sleep(1.0)
         return True
 
