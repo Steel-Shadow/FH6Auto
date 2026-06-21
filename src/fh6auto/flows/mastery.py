@@ -63,7 +63,7 @@ class MasteryFlow:
         self.app.services.input_actions.game_click(pos_buycar)
         time.sleep(0.8)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(1)
+        time.sleep(2)
 
         pos_bs = self.app.services.image_waits.wait_for_footer_text_ui(
             "选择",

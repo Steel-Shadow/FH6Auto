@@ -30,13 +30,13 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid #2d86c8;
-  border-radius: 8px;
+  border-radius: 7px;
   background: #2378b9;
   color: #ffffff;
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 32px;
+  padding: 0 12px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -83,12 +83,12 @@ button.danger:hover:not(:disabled) {
 input,
 select {
   width: 100%;
-  min-height: 36px;
+  min-height: 32px;
   border: 1px solid #344253;
-  border-radius: 8px;
+  border-radius: 7px;
   background: #0f151d;
   color: #e7edf4;
-  padding: 0 10px;
+  padding: 0 9px;
   outline: none;
 }
 
@@ -106,21 +106,21 @@ label span {
   display: block;
   color: #97a7ba;
   font-size: 13px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .app-shell {
-  width: min(1480px, calc(100% - 32px));
+  width: min(1480px, calc(100% - 24px));
   margin: 0 auto;
-  padding: 24px 0 32px;
+  padding: 18px 0 24px;
 }
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
 .topbar h1 {
@@ -131,7 +131,7 @@ label span {
 }
 
 .topbar p {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   color: #8c9caf;
 }
 
@@ -172,8 +172,8 @@ label span {
 .runtime-band {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .runtime-band div,
@@ -186,8 +186,8 @@ label span {
 }
 
 .runtime-band div {
-  min-height: 78px;
-  padding: 16px;
+  min-height: 64px;
+  padding: 12px;
 }
 
 .runtime-band span {
@@ -198,7 +198,7 @@ label span {
 
 .runtime-band strong {
   display: block;
-  margin-top: 8px;
+  margin-top: 6px;
   color: #f4f8fb;
   font-size: 22px;
 }
@@ -214,9 +214,10 @@ label span {
 
 .module-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 14px;
 }
 
 .module-card {
@@ -224,7 +225,7 @@ label span {
   border: 1px solid #283443;
   border-top: 4px solid #4da3ff;
   border-radius: 8px;
-  padding: 16px;
+  padding: 12px;
   box-shadow: 0 16px 32px rgba(0, 0, 0, 0.2);
 }
 
@@ -250,32 +251,32 @@ label span {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .module-title h2,
 .section-title h2 {
   margin: 0;
   color: #f7fafc;
-  font-size: 18px;
+  font-size: 17px;
   letter-spacing: 0;
 }
 
 .module-card label {
   display: block;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .wheelspin-config {
   display: grid;
-  gap: 12px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .wheelspin-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: end;
 }
 
@@ -289,7 +290,7 @@ label span {
 
 .next-row {
   align-items: end;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .next-row label:first-child {
@@ -301,7 +302,7 @@ label span {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 32px;
 }
 
 .check-line.compact {
@@ -327,7 +328,7 @@ label span {
 
 .settings-panel,
 .log-panel {
-  padding: 16px;
+  padding: 14px;
 }
 
 .form-grid {
@@ -427,7 +428,6 @@ label span {
 }
 
 @media (max-width: 1180px) {
-  .module-grid,
   .settings-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
