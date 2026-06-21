@@ -38,7 +38,9 @@ class AutoWheelspinFlow:
 
     def _read_footer_norm_text(self) -> str:
         try:
-            results = self.app.services.ocr.read(self.app.services.image_cache.capture_region(self._footer_region()), text_score=0.25)
+            results = self.app.services.ocr.read(
+                self.app.services.image_cache.capture_region(self._footer_region()), text_score=0.25
+            )
         except Exception as e:
             self.app.log(f"读取抽奖底部提示失败: {e}")
             return ""
@@ -77,11 +79,7 @@ class AutoWheelspinFlow:
             self.app.log(f"读取重复车辆弹窗失败: {e}")
             return False
 
-        text = "".join(
-            self.app.services.ocr.normalize_text(result.text)
-            for result in results
-            if result.score >= 0.25
-        )
+        text = "".join(self.app.services.ocr.normalize_text(result.text) for result in results if result.score >= 0.25)
         return "已拥有车辆" in text or "添加至车库" in text
 
     def _read_owned_car_sell_price(self, timeout: float = 1.5) -> int | None:
@@ -225,7 +223,7 @@ class AutoWheelspinFlow:
 
             state = self._detect_wheelspin_footer_state()
 
-            if state =="not_in_wheelspin":
+            if state == "not_in_wheelspin":
                 self.app.log(f"未检测到不在{label}界面，终止{label}流程。")
                 return True
 
@@ -335,6 +333,21 @@ class AutoWheelspinFlow:
                 progress_total,
                 duplicate_popup_limit,
             ):
+                # TODO: 有概率在抽到重复车辆后，卡死在车辆处置页面，这里按一下回车，领取车辆。
+                # TODO: 我不知道为什么这里会卡死，有空了再仔细地debug，这里先粗糙地按一下回车处理掉，使得流程能正常进行。
+                # [23:18:57] 定位超级抽奖入口...
+                # [23:18:57] [SIFTMatch] 命中: superwheelspin.png | 内点: 217/255 (阈值 50) | 估算缩放: 0.461
+                # [23:18:59] 已进入超级抽奖并确认。
+                # [23:18:59] 开始执行超级抽奖循环。
+                # [23:19:03] 超级抽奖已用完，累计完成 1 次，领取奖励后结束。
+                # [23:19:07] 定位普通抽奖入口...
+                # [23:19:09] 未找到普通抽奖入口。
+                # [23:19:09] 准备验证/进入菜单...
+                # [23:19:09] 正在尝试进入主菜单...
+                # [23:19:09] 未在主菜单... (1/60)
+                # [23:19:10] 未在主菜单... (2/60)
+                # [23:19:11] 未在主菜单... (3/60)
+                self.app.services.input_actions.hw_press("enter")
                 return False
 
         return True
