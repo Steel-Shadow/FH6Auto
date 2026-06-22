@@ -11,11 +11,8 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(ROOT_DIR, "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
 
-from fh6auto.bootstrap import prepare_runtime
+from backend.fh6auto.bootstrap import prepare_runtime
 
 
 FRONTEND_DIR = Path(ROOT_DIR) / "frontend"
@@ -65,7 +62,7 @@ def start_backend(host: str, port: int):
         return None
 
     import uvicorn
-    from fh6auto.backend.api import app
+    from backend.fh6auto.backend.api import app
 
     prepare_runtime()
 

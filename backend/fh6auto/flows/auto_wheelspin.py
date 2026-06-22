@@ -336,38 +336,32 @@ class AutoWheelspinFlow:
         )
         self._update_wheelspin_progress(progress_total)
 
-        tasks = (
-            ("超级抽奖", SUPER_WHEELSPIN_REFERENCE, target_count, super_use_all, SUPER_DUPLICATE_POPUP_LIMIT),
-            ("普通抽奖", NORMAL_WHEELSPIN_REFERENCE, normal_count, normal_use_all, NORMAL_DUPLICATE_POPUP_LIMIT),
-        )
+        should_run_super = super_use_all or int(target_count) > 0
+        should_run_normal = normal_use_all or int(normal_count) > 0
 
-        if not any(use_all or int(count) > 0 for _, _, count, use_all, _ in tasks):
+        if not should_run_super and not should_run_normal:
             return finish("抽奖次数为 0")
 
-        for label, reference_path, count, use_all, duplicate_popup_limit in tasks:
-            if not self._run_wheelspin_type(
-                label,
-                reference_path,
-                count,
-                use_all,
-                progress_total,
-                duplicate_popup_limit,
-            ):
-                # TODO: 有概率在抽到重复车辆后，卡死在车辆处置页面，这里按一下回车，领取车辆。
-                # TODO: 我不知道为什么这里会卡死，有空了再仔细地debug，这里先粗糙地按一下回车处理掉，使得流程能正常进行。
-                # [23:18:57] 定位超级抽奖入口...
-                # [23:18:57] [SIFTMatch] 命中: superwheelspin.png | 内点: 217/255 (阈值 50) | 估算缩放: 0.461
-                # [23:18:59] 已进入超级抽奖并确认。
-                # [23:18:59] 开始执行超级抽奖循环。
-                # [23:19:03] 超级抽奖已用完，累计完成 1 次，领取奖励后结束。
-                # [23:19:07] 定位普通抽奖入口...
-                # [23:19:09] 未找到普通抽奖入口。
-                # [23:19:09] 准备验证/进入菜单...
-                # [23:19:09] 正在尝试进入主菜单...
-                # [23:19:09] 未在主菜单... (1/60)
-                # [23:19:10] 未在主菜单... (2/60)
-                # [23:19:11] 未在主菜单... (3/60)
-                self.app.services.input_actions.hw_press("enter")
-                return False
+        if should_run_super and not self._run_wheelspin_type(
+            "超级抽奖",
+            SUPER_WHEELSPIN_REFERENCE,
+            target_count,
+            super_use_all,
+            progress_total,
+            SUPER_DUPLICATE_POPUP_LIMIT,
+        ):
+            self.app.services.input_actions.hw_press("enter")
+            return False
+
+        if should_run_normal and not self._run_wheelspin_type(
+            "普通抽奖",
+            NORMAL_WHEELSPIN_REFERENCE,
+            normal_count,
+            normal_use_all,
+            progress_total,
+            NORMAL_DUPLICATE_POPUP_LIMIT,
+        ):
+            self.app.services.input_actions.hw_press("enter")
+            return False
 
         return finish()

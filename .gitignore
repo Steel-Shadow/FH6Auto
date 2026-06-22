@@ -1,3 +1,4 @@
+/.agents/
 /log/
 /.venv/
 *.pdf
