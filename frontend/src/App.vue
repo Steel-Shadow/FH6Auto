@@ -356,6 +356,15 @@ watch(
             <span>制造商扫描步数</span>
             <input v-model.number="draft.manufacturer_scan_steps" type="number" min="5" max="50" @input="dirty = true" />
           </label>
+          <label>
+            <span>日志级别</span>
+            <select v-model="draft.log_level" @change="dirty = true">
+              <option value="info">info</option>
+              <option value="debug">debug</option>
+              <option value="warning">warning</option>
+              <option value="error">error</option>
+            </select>
+          </label>
           <label class="wide">
             <span>启动命令</span>
             <input v-model="draft.restart_cmd" @input="dirty = true" />

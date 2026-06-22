@@ -42,7 +42,7 @@ class AutoWheelspinFlow:
                 self.app.services.image_cache.capture_region(self._footer_region()), text_score=0.25
             )
         except Exception as e:
-            self.app.log(f"读取抽奖底部提示失败: {e}")
+            self.app.log(f"读取抽奖底部提示失败: {e}", level="warning")
             return ""
 
         parts = []
@@ -76,7 +76,7 @@ class AutoWheelspinFlow:
                 text_score=0.25,
             )
         except Exception as e:
-            self.app.log(f"读取重复车辆弹窗失败: {e}")
+            self.app.log(f"读取重复车辆弹窗失败: {e}", level="warning")
             return False
 
         text = "".join(self.app.services.ocr.normalize_text(result.text) for result in results if result.score >= 0.25)
@@ -106,13 +106,13 @@ class AutoWheelspinFlow:
 
         price = self._read_owned_car_sell_price()
         if price is not None and price < OWNED_CAR_SELL_THRESHOLD:
-            self.app.log(f"检测到{label}重复车辆，出售价格 CR {price:,}，低于 CR 100,000，选择出售。")
+            self.app.log(f"检测到{label}重复车辆，出售价格 CR {price:,}，低于 CR 100,000，选择出售。", level="debug")
             self._sell_owned_car()
         else:
             if price is None:
-                self.app.log(f"检测到{label}重复车辆弹窗，但未识别到出售价格，保守选择添加至车库。")
+                self.app.log(f"检测到{label}重复车辆弹窗，但未识别到出售价格，保守选择添加至车库。", level="debug")
             else:
-                self.app.log(f"检测到{label}重复车辆，出售价格 CR {price:,}，选择添加至车库。")
+                self.app.log(f"检测到{label}重复车辆，出售价格 CR {price:,}，选择添加至车库。", level="debug")
             self.app.services.input_actions.hw_press("enter")
         time.sleep(1.0)
         return True
@@ -147,11 +147,11 @@ class AutoWheelspinFlow:
         self.app.state.set_task("自动抽奖", self.app.state.wheelspin_counter, progress_total)
 
     def _prepare_my_horizon_menu(self) -> bool:
-        self.app.log("准备验证/进入菜单...")
+        self.app.log("准备验证/进入菜单...", level="debug")
         if not self.app.services.recovery.enter_menu():
             return False
 
-        self.app.log("切换到我的地平线...")
+        self.app.log("切换到我的地平线...", level="debug")
         for _ in range(2):
             if not self.app.state.is_running:
                 return False
@@ -160,7 +160,7 @@ class AutoWheelspinFlow:
         return True
 
     def _find_wheelspin_entry(self, reference_path: str, label: str, timeout: float):
-        self.app.log(f"定位{label}入口...")
+        self.app.log(f"定位{label}入口...", level="debug")
         pos_wheelspin = self.app.services.image_waits.wait_for_image_sift(
             reference_path,
             region=self.app.services.game_window.regions["全界面"],
@@ -171,17 +171,17 @@ class AutoWheelspinFlow:
             interval=0.3,
         )
         if not pos_wheelspin:
-            self.app.log(f"未找到{label}入口。")
+            self.app.log(f"未找到{label}入口。", level="warning")
         return pos_wheelspin
 
     def _enter_wheelspin_entry(self, reference_path: str, label: str) -> bool:
         if not os.path.exists(get_img_path(reference_path)):
-            self.app.log(f"缺少{label}入口参考图：images/{reference_path}")
+            self.app.log(f"缺少{label}入口参考图：images/{reference_path}", level="warning")
             return False
 
         pos_wheelspin = self._find_wheelspin_entry(reference_path, label, timeout=1.5)
         if pos_wheelspin:
-            self.app.log(f"已在当前页面找到{label}入口。")
+            self.app.log(f"已在当前页面找到{label}入口。", level="debug")
         else:
             if not self._prepare_my_horizon_menu():
                 return False
@@ -194,7 +194,7 @@ class AutoWheelspinFlow:
         time.sleep(1.0)
         self.app.services.input_actions.hw_press("enter")
         time.sleep(0.8)
-        self.app.log(f"已进入{label}并确认。")
+        self.app.log(f"已进入{label}并确认。", level="debug")
         return True
 
     def _run_wheelspin_loop(
@@ -207,10 +207,10 @@ class AutoWheelspinFlow:
     ) -> bool:
         target_count = max(0, int(target_count))
         if not use_all and target_count <= 0:
-            self.app.log(f"{label}次数为 0，跳过。")
+            self.app.log(f"{label}次数为 0，跳过。", level="debug")
             return True
 
-        self.app.log(f"开始执行{label}循环。")
+        self.app.log(f"开始执行{label}循环。", level="debug")
         last_state_time = time.time()
         completed_count = 0
 
@@ -224,11 +224,11 @@ class AutoWheelspinFlow:
             state = self._detect_wheelspin_footer_state()
 
             if state == "not_in_wheelspin":
-                self.app.log(f"未检测到不在{label}界面，终止{label}流程。")
+                self.app.log(f"未检测到不在{label}界面，终止{label}流程。", level="warning")
                 return True
 
             elif state == "skip":
-                self.app.log("检测到抽奖动画，可跳过，按 Enter。")
+                self.app.log("检测到抽奖动画，可跳过，按 Enter。", level="debug")
                 self.app.services.input_actions.hw_press("enter")
                 last_state_time = time.time()
                 time.sleep(1.0)
@@ -240,14 +240,14 @@ class AutoWheelspinFlow:
                 self._update_wheelspin_progress(progress_total)
 
                 if not use_all and completed_count >= target_count:
-                    self.app.log(f"{label} {completed_count}/{target_count} 完成，领取奖励并退出。")
+                    self.app.log(f"{label} {completed_count}/{target_count} 完成，领取奖励并退出。", level="debug")
                     self.app.services.input_actions.hw_press("esc")
                     time.sleep(1.5)
                     self._clear_owned_car_dialogs(label, duplicate_popup_limit)
                     return True
 
                 progress_text = f"{completed_count}/{target_count}" if not use_all else f"已完成 {completed_count} 次"
-                self.app.log(f"{label} {progress_text}，领取奖励并继续下一次。")
+                self.app.log(f"{label} {progress_text}，领取奖励并继续下一次。", level="debug")
                 self.app.services.input_actions.hw_press("enter")
                 last_state_time = time.time()
                 time.sleep(1.5)
@@ -258,18 +258,18 @@ class AutoWheelspinFlow:
                 self.app.state.wheelspin_counter += 1
                 self._update_wheelspin_progress(progress_total)
                 if use_all:
-                    self.app.log(f"{label}已用完，累计完成 {completed_count} 次，领取奖励后结束。")
+                    self.app.log(f"{label}已用完，累计完成 {completed_count} 次，领取奖励后结束。", level="debug")
                 elif completed_count >= target_count:
-                    self.app.log(f"{label} {completed_count}/{target_count} 完成，领取奖励后退出。")
+                    self.app.log(f"{label} {completed_count}/{target_count} 完成，领取奖励后退出。", level="debug")
                 else:
-                    self.app.log(f"{label}机会已用完，当前进度 {completed_count}/{target_count}，领取奖励后结束。")
+                    self.app.log(f"{label}机会已用完，当前进度 {completed_count}/{target_count}，领取奖励后结束。", level="debug")
                 self.app.services.input_actions.hw_press("enter")
                 time.sleep(1.5)
                 self._clear_owned_car_dialogs(label, duplicate_popup_limit)
                 return True
 
             if time.time() - last_state_time > self.STATE_TIMEOUT_SECONDS:
-                self.app.log("等待抽奖界面底部提示超时，自动抽奖流程停止。")
+                self.app.log("等待抽奖界面底部提示超时，自动抽奖流程停止。", level="warning")
                 return False
 
             time.sleep(0.4)
@@ -286,7 +286,7 @@ class AutoWheelspinFlow:
         duplicate_popup_limit: int,
     ) -> bool:
         if not use_all and int(target_count) <= 0:
-            self.app.log(f"{label}次数为 0，跳过。")
+            self.app.log(f"{label}次数为 0，跳过。", level="debug")
             return True
         if not self._enter_wheelspin_entry(reference_path, label):
             return False
@@ -305,6 +305,13 @@ class AutoWheelspinFlow:
         super_use_all: bool = False,
         normal_use_all: bool = False,
     ) -> bool:
+        start_count = self.app.state.wheelspin_counter
+
+        def finish(reason: str | None = None) -> bool:
+            suffix = f"原因：{reason}" if reason else ""
+            self.app.log(f"自动抽奖流程结束：完成 {self.app.state.wheelspin_counter - start_count} 次。{suffix}")
+            return True
+
         progress_total = self._fixed_progress_total(
             target_count,
             normal_count,
@@ -319,8 +326,7 @@ class AutoWheelspinFlow:
         )
 
         if not any(use_all or int(count) > 0 for _, _, count, use_all, _ in tasks):
-            self.app.log("自动抽奖次数均为 0，跳过。")
-            return True
+            return finish("抽奖次数为 0")
 
         for label, reference_path, count, use_all, duplicate_popup_limit in tasks:
             if not self.app.state.is_running:
@@ -350,4 +356,4 @@ class AutoWheelspinFlow:
                 self.app.services.input_actions.hw_press("enter")
                 return False
 
-        return True
+        return finish()

@@ -41,6 +41,14 @@ class BackendApp:
             "config": self.services.config.snapshot(),
         }
 
-    def log(self, message: str) -> None:
-        item = self.state.append_log(str(message))
-        print(f"[{item['time']}] {message}", flush=True)
+    def log(self, message: str, level: str = "info") -> None:
+        level = self.state.normalize_log_level(level)
+        min_level = "info"
+        try:
+            min_level = str(self.services.config.values.get("log_level", "info"))
+        except Exception:
+            pass
+
+        item = self.state.append_log(str(message), level=level, min_level=min_level)
+        if item is not None:
+            print(f"[{item['time']}] [{level.upper()}] {message}", flush=True)

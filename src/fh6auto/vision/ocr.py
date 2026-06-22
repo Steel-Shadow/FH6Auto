@@ -92,7 +92,7 @@ class OcrService:
             provider_summary = ", ".join(
                 f"{name}={providers or ['unknown']}" for name, providers in self._providers.items()
             )
-            self.app.log(f"OCR 引擎已初始化，{provider_summary or 'providers=unknown'}。")
+            self.app.log(f"OCR 引擎已初始化，{provider_summary or 'providers=unknown'}。", level="debug")
             return self._engine
 
     def _read_session_providers(self) -> dict[str, list[str] | None]:
@@ -276,7 +276,7 @@ class OcrService:
         for target_text in cache_key:
             target_norm = self.normalize_text(target_text)
             if len(target_norm) < 2 or "?" in target_norm:
-                self.app.log(f"[TextOCR] 跳过目标文字 {target_text}：内容不可用。")
+                self.app.log(f"[TextOCR] 跳过目标文字 {target_text}：内容不可用。", level="debug")
                 continue
             targets.append((target_text, target_norm))
         self._text_targets_cache[cache_key] = targets
@@ -473,13 +473,14 @@ class OcrService:
                 self.app.log(
                     f"[TextOCR] 命中: {best.text} "
                     f"(目标:{best.target}) | 分数:{best.score:.3f} "
-                    f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}"
+                    f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}",
+                    level="debug",
                 )
                 return self._remember_text_match(best)
 
             return None
         except Exception as e:
-            self.app.log(f"find_any_text_ui 异常: {e}")
+            self.app.log(f"find_any_text_ui 异常: {e}", level="warning")
             return None
 
     def find_sell_price_value(self, region=None, threshold=0.25) -> int | None:
@@ -501,10 +502,10 @@ class OcrService:
             combined_text = "".join(result.text for result in results)
             value = self.parse_credit_value(combined_text)
             if value is not None:
-                self.app.log(f"[PriceOCR] 出售价格: CR {value:,} | OCR: {combined_text}")
+                self.app.log(f"[PriceOCR] 出售价格: CR {value:,} | OCR: {combined_text}", level="debug")
             return value
         except Exception as e:
-            self.app.log(f"find_sell_price_value 异常: {e}")
+            self.app.log(f"find_sell_price_value 异常: {e}", level="warning")
             return None
 
     def _find_menu_button_candidate_boxes(self, screen_bgr, max_candidates=16):
@@ -620,13 +621,14 @@ class OcrService:
                 self.app.log(
                     f"[MenuOCR] 命中: {best.text} "
                     f"(目标:{best.target}) | 分数:{best.score:.3f} "
-                    f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}{ocr_box_text}"
+                    f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}{ocr_box_text}",
+                    level="debug",
                 )
                 return self._remember_text_match(best)
 
             return None
         except Exception as e:
-            self.app.log(f"find_menu_text_ui 异常: {e}")
+            self.app.log(f"find_menu_text_ui 异常: {e}", level="warning")
             return None
 
     def _footer_text_regions(self, region):
@@ -695,13 +697,14 @@ class OcrService:
                     self.app.log(
                         f"[FooterOCR] 命中: {best.text} "
                         f"(目标:{best.target}) | 分数:{best.score:.3f} "
-                        f"(阈值 {threshold}) | 区域:{best.region_name}{box_text}"
+                        f"(阈值 {threshold}) | 区域:{best.region_name}{box_text}",
+                        level="debug",
                     )
                     return self._remember_text_match(best)
 
             return None
         except Exception as e:
-            self.app.log(f"find_footer_text_ui 异常: {e}")
+            self.app.log(f"find_footer_text_ui 异常: {e}", level="warning")
             return None
 
     @staticmethod
@@ -786,11 +789,12 @@ class OcrService:
                 self.last_positions[target_text] = pos
                 self.app.log(
                     f"[ManufacturerOCR] 命中: {result.text} (目标:{target_text}) | 分数:{result.score:.3f} "
-                    f"(阈值 {threshold}) | 单元格: x={x}, y={y}, w={cell_w}, h={cell_h}"
+                    f"(阈值 {threshold}) | 单元格: x={x}, y={y}, w={cell_w}, h={cell_h}",
+                    level="debug",
                 )
                 return pos
 
             return None
         except Exception as e:
-            self.app.log(f"find_manufacturer_text 异常: {e}")
+            self.app.log(f"find_manufacturer_text 异常: {e}", level="warning")
             return None

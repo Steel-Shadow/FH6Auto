@@ -15,6 +15,13 @@ class ProgressSnapshot:
 
 
 class RuntimeState:
+    LOG_LEVELS = {
+        "debug": 10,
+        "info": 20,
+        "warning": 30,
+        "error": 40,
+    }
+
     def __init__(self, max_logs: int = 1000) -> None:
         self._lock = RLock()
         self._logs: deque[dict[str, Any]] = deque(maxlen=max_logs)
@@ -35,11 +42,27 @@ class RuntimeState:
         self.started_at: float | None = None
         self.status = "idle"
 
-    def append_log(self, message: str) -> dict[str, Any]:
+    @classmethod
+    def normalize_log_level(cls, level: str) -> str:
+        level = str(level or "info").lower()
+        return level if level in cls.LOG_LEVELS else "info"
+
+    @classmethod
+    def should_emit_log(cls, level: str, min_level: str = "info") -> bool:
+        level = cls.normalize_log_level(level)
+        min_level = cls.normalize_log_level(min_level)
+        return cls.LOG_LEVELS[level] >= cls.LOG_LEVELS[min_level]
+
+    def append_log(self, message: str, level: str = "info", min_level: str = "info") -> dict[str, Any] | None:
+        level = self.normalize_log_level(level)
+        if not self.should_emit_log(level, min_level):
+            return None
+
         with self._lock:
             item = {
                 "id": self._next_log_id,
                 "time": time.strftime("%H:%M:%S"),
+                "level": level,
                 "message": message,
             }
             self._next_log_id += 1

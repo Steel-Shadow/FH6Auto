@@ -96,14 +96,14 @@ class RaceFlow:
             )
 
         if pos_restarta:
-            self.app.log("找到重开赛事入口，点击重开赛事...")
+            self.app.log("找到重开赛事入口，点击重开赛事...", level="debug")
             self.app.services.input_actions.game_click(pos_restarta)
             time.sleep(1.0)
             self.app.services.input_actions.hw_press("enter")
             time.sleep(4.0)
             return
 
-        self.app.log("未识别重开赛事入口，尝试键盘菜单路径重开赛事...")
+        self.app.log("未识别重开赛事入口，尝试键盘菜单路径重开赛事...", level="warning")
         self.app.services.input_actions.hw_press("down")
         time.sleep(0.3)
         self.app.services.input_actions.hw_press("enter")
@@ -138,20 +138,22 @@ class RaceFlow:
         if self._wait_for_event_loaded():
             return True
 
-        self.app.log("链接超时")
+        self.app.log("链接超时", level="warning")
         return False
 
     def logic_race(self, target_count):
+        start_count = self.app.state.race_counter
         if self.app.state.race_counter >= target_count:
+            self.app.log("循环跑图流程结束：完成 0 次。")
             return True
 
         self.app.state.set_task("循环跑图", self.app.state.race_counter, target_count)
 
-        self.app.log("准备验证/进入菜单...")
+        self.app.log("准备验证/进入菜单...", level="debug")
         if not self.app.services.recovery.enter_menu():
             return False
 
-        self.app.log("切换到创意中心...")
+        self.app.log("切换到创意中心...", level="debug")
         for _ in range(4):
             self.app.services.input_actions.hw_press("pagedown", delay=0.15)
             time.sleep(0.3)
@@ -167,7 +169,7 @@ class RaceFlow:
         )
 
         if not pos_el:
-            self.app.log("未找到 eventlab")
+            self.app.log("未找到 eventlab", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_el)
@@ -181,7 +183,7 @@ class RaceFlow:
             interval=0.3,
         )
         if not pos_yg:
-            self.app.log("未找到游玩赛事")
+            self.app.log("未找到游玩赛事", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_yg)
@@ -198,7 +200,7 @@ class RaceFlow:
         pos_target = self._wait_for_race_car(timeout=2)
 
         if not pos_target:
-            self.app.log("未找到目标跑图车辆，重新选择制造商...")
+            self.app.log("未找到目标跑图车辆，重新选择制造商...", level="debug")
             self.app.services.input_actions.hw_press("backspace")
             time.sleep(1.2)
 
@@ -208,7 +210,7 @@ class RaceFlow:
                 label="刷图车辆制造商",
             )
             if not pos_brand:
-                self.app.log("未找到刷图车辆制造商。")
+                self.app.log("未找到刷图车辆制造商。", level="warning")
                 return False
 
             self.app.services.input_actions.game_click(pos_brand)
@@ -228,7 +230,7 @@ class RaceFlow:
                 time.sleep(0.4)
 
         if not pos_target:
-            self.app.log("翻页未能找到目标跑图车辆。")
+            self.app.log("翻页未能找到目标跑图车辆。", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_target)
@@ -236,13 +238,13 @@ class RaceFlow:
         self.app.services.input_actions.hw_press("enter")
         time.sleep(4.0)
 
-        self.app.log("前置完成，开始循环跑图！")
+        self.app.log("前置完成，开始循环跑图！", level="debug")
 
         while self.app.state.race_counter < target_count:
             if not self.app.state.is_running:
                 return False
 
-            self.app.log(f"跑图 {self.app.state.race_counter + 1}/{target_count}: 找开始竞赛赛事按钮...")
+            self.app.log(f"跑图 {self.app.state.race_counter + 1}/{target_count}: 找开始竞赛赛事按钮...", level="debug")
 
             pos = None
             for _ in range(120):
@@ -257,7 +259,7 @@ class RaceFlow:
                 time.sleep(0.25)
 
             if not pos:
-                self.app.log("找不到开始竞赛赛事按钮，退出跑图。")
+                self.app.log("找不到开始竞赛赛事按钮，退出跑图。", level="warning")
                 return False
 
             self.app.services.input_actions.game_click(pos)
@@ -297,7 +299,7 @@ class RaceFlow:
                 now = time.time()
 
                 if now - race_start_time > self.RACE_TIMEOUT_SECONDS:
-                    self.app.log(f"跑图超时(已超过{self.RACE_TIMEOUT_SECONDS:.0f}秒)！触发强制重开赛事逻辑...")
+                    self.app.log(f"跑图超时(已超过{self.RACE_TIMEOUT_SECONDS:.0f}秒)！触发强制重开赛事逻辑...", level="warning")
                     timeout_triggered = True
                     break
 
@@ -305,14 +307,14 @@ class RaceFlow:
                 if now - last_like_chk >= 3.0:
                     vram_result = self.app.services.recovery.check_vramne_during_race()
                     if vram_result is True:
-                        self.app.log("VRAM恢复完成，结束当前跑图流程，交给外层重新恢复。")
+                        self.app.log("VRAM恢复完成，结束当前跑图流程，交给外层重新恢复。", level="warning")
                         return False
                     elif vram_result is False:
-                        self.app.log("VRAM恢复失败。")
+                        self.app.log("VRAM恢复失败。", level="warning")
                         return False
                     pos_like = self._find_like_author_prompt()
                     if pos_like:
-                        self.app.log("识别到点赞作界面，执行回车确认！")
+                        self.app.log("识别到点赞作界面，执行回车确认！", level="debug")
                         self.app.services.input_actions.hw_press("enter")
                     last_like_chk = now
 
@@ -355,4 +357,5 @@ class RaceFlow:
             self.app.state.race_counter += 1
             self.app.state.set_task("循环跑图", self.app.state.race_counter, target_count)
 
+        self.app.log(f"循环跑图流程结束：完成 {self.app.state.race_counter - start_count} 次。")
         return True

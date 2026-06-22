@@ -78,7 +78,7 @@ class BackendConfigService:
             "super_wheelspin_use_all",
             "normal_wheelspin_use_all",
         }
-        string_keys = {"share_code", "restart_cmd", "calc_a", "calc_b", "calc_c", "calc_d"}
+        string_keys = {"share_code", "restart_cmd", "calc_a", "calc_b", "calc_c", "calc_d", "log_level"}
 
         for key, value in updates.items():
             if key not in DEFAULT_CONFIG:
@@ -91,7 +91,7 @@ class BackendConfigService:
             elif key in bool_keys:
                 normalized[key] = bool(value)
             elif key in string_keys:
-                normalized[key] = str(value)
+                normalized[key] = str(value).lower() if key == "log_level" else str(value)
             elif key == "skill_dirs":
                 normalized[key] = self._valid_skill_dirs(value)
         return normalized

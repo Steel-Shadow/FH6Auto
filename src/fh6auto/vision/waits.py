@@ -212,12 +212,15 @@ class ImageWaitsService:
 
         pos = wait_for_current_page(timeout=1.0)
         if pos:
-            self.app.log(f"已在当前页面找到{label}。")
+            self.app.log(f"已在当前页面找到{label}。", level="debug")
             return pos
 
         scan_plan = (("up", "上", max_steps), ("down", "下", max_steps * 2))
         for direction, direction_label, steps in scan_plan:
-            self.app.log(f"当前页面未找到{label}，开始向{direction_label}扫描制造商列表 ({steps} 步)...")
+            self.app.log(
+                f"当前页面未找到{label}，开始向{direction_label}扫描制造商列表 ({steps} 步)...",
+                level="debug",
+            )
             for step in range(steps):
                 if not self.app.state.is_running:
                     return None
@@ -227,8 +230,8 @@ class ImageWaitsService:
 
                 pos = wait_for_current_page(timeout=0.35)
                 if pos:
-                    self.app.log(f"找到{label}：向{direction_label}扫描第 {step + 1} 步。")
+                    self.app.log(f"找到{label}：向{direction_label}扫描第 {step + 1} 步。", level="debug")
                     return pos
 
-        self.app.log(f"扫描制造商列表后仍未找到{label}。")
+        self.app.log(f"扫描制造商列表后仍未找到{label}。", level="debug")
         return None

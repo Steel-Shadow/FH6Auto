@@ -105,13 +105,14 @@ class ImageMatcherService:
                         self.last_positions[image_path] = pos
                         self.app.log(
                             f"[GrayMatchAny] 命中: {image_path} | 模式: {mode} | "
-                            f"灰度得分: {score:.3f} (阈值 {threshold}) | 缩放比: {scale:.3f}"
+                            f"灰度得分: {score:.3f} (阈值 {threshold}) | 缩放比: {scale:.3f}",
+                            level="debug",
                         )
                         return pos
 
             return None
         except Exception as e:
-            self.app.log(f"find_any_image_gray 异常: {e}")
+            self.app.log(f"find_any_image_gray 异常: {e}", level="warning")
             return None
 
     @staticmethod
@@ -954,7 +955,8 @@ class ImageMatcherService:
                     f"[CarCardOCR] 锁定: {card_path} | 综合:{best_ocr.score:.3f} | "
                     f"车型:{spec.title or '-'} | 制造商:{spec.manufacturer or '-'} | 稀有度:{spec.rarity or '-'} | "
                     f"PI:{spec.car_class or '-'} {spec.pi or '-'} | 年份:{spec.year or '-'} | "
-                    f"全新:{'是' if spec.is_new else '否'}"
+                    f"全新:{'是' if spec.is_new else '否'}",
+                    level="debug",
                 )
                 return pos
             if target_spec is not None:
@@ -1035,7 +1037,8 @@ class ImageMatcherService:
                     if "excluded_tag" in failed:
                         self.app.log(
                             f"[CarCardMatch] 排除候选: {card_path} | 排除标签 {excluded_tag_path}: "
-                            f"{scores['excluded_tag']:.3f}"
+                            f"{scores['excluded_tag']:.3f}",
+                            level="debug",
                         )
                     if failed:
                         continue
@@ -1105,7 +1108,8 @@ class ImageMatcherService:
                     if "excluded_tag" in failed:
                         self.app.log(
                             f"[CarCardMatch] 排除候选: {card_path} | 排除标签 {excluded_tag_path}: "
-                            f"{scores['excluded_tag']:.3f}"
+                            f"{scores['excluded_tag']:.3f}",
+                            level="debug",
                         )
                     if failed:
                         continue
@@ -1140,12 +1144,13 @@ class ImageMatcherService:
                 f"[CarCardMatch] 锁定: {card_path} | 方法:{best.get('method', 'template')} | 综合:{scores['final']:.3f} | "
                 f"标题:{scores['title']:.3f} | PI:{scores['pi']:.3f} | 稀有度:{scores['rarity']:.3f} | "
                 f"车身:{scores['body']:.3f} | 车辆:{scores.get('vehicle', 0.0):.3f} | "
-                f"标签:{scores['required_tag']:.3f} | 缩放:{scores['scale']:.3f}"
+                f"标签:{scores['required_tag']:.3f} | 缩放:{scores['scale']:.3f}",
+                level="debug",
             )
             return best["pos"]
 
         except Exception as e:
-            self.app.log(f"find_car_card 异常: {e}")
+            self.app.log(f"find_car_card 异常: {e}", level="warning")
             return None
 
     def _get_sift_reference_features(self, reference_path, max_features=2500):
@@ -1153,7 +1158,7 @@ class ImageMatcherService:
         try:
             stat = os.stat(actual_path)
         except OSError:
-            self.app.log(f"SIFT 参考图不存在：{reference_path}")
+            self.app.log(f"SIFT 参考图不存在：{reference_path}", level="warning")
             return None
 
         cache_key = ("sift", actual_path, stat.st_mtime, stat.st_size, int(max_features))
@@ -1162,18 +1167,18 @@ class ImageMatcherService:
 
         reference_gray = cv2.imread(actual_path, cv2.IMREAD_GRAYSCALE)
         if reference_gray is None:
-            self.app.log(f"SIFT 参考图读取失败：{reference_path}")
+            self.app.log(f"SIFT 参考图读取失败：{reference_path}", level="warning")
             return None
 
         try:
             sift = cv2.SIFT_create(nfeatures=int(max_features))
         except Exception as e:
-            self.app.log(f"当前 OpenCV 不支持 SIFT：{e}")
+            self.app.log(f"当前 OpenCV 不支持 SIFT：{e}", level="warning")
             return None
 
         keypoints, descriptors = sift.detectAndCompute(reference_gray, None)
         if descriptors is None or len(keypoints) < 4:
-            self.app.log(f"SIFT 参考图特征不足：{reference_path}")
+            self.app.log(f"SIFT 参考图特征不足：{reference_path}", level="warning")
             return None
 
         data = (keypoints, descriptors, reference_gray.shape[:2], actual_path)
@@ -1297,12 +1302,13 @@ class ImageMatcherService:
             self.last_positions[best["reference_path"]] = pos
             self.app.log(
                 f"[SIFTMatch] 命中: {best['reference_path']} | 内点: {best['inliers']}/{best['good']} "
-                f"(阈值 {min_inliers}) | 估算缩放: {best['scale']:.3f}"
+                f"(阈值 {min_inliers}) | 估算缩放: {best['scale']:.3f}",
+                level="debug",
             )
             return pos
 
         except Exception as e:
-            self.app.log(f"find_any_image_sift 异常: {e}")
+            self.app.log(f"find_any_image_sift 异常: {e}", level="warning")
             return None
 
     def find_image_sift(
@@ -1384,12 +1390,13 @@ class ImageMatcherService:
                 int(round(y + h / 2 + (region[1] if region else 0))),
             )
             self.app.log(
-                f"[RaceResultTable] 命中结果页表格 | 宽:{w} 高:{h} | 亮色密度:{density:.3f}"
+                f"[RaceResultTable] 命中结果页表格 | 宽:{w} 高:{h} | 亮色密度:{density:.3f}",
+                level="debug",
             )
             return pos
 
         except Exception as e:
-            self.app.log(f"find_race_result_table 异常: {e}")
+            self.app.log(f"find_race_result_table 异常: {e}", level="warning")
             return None
 
 

@@ -29,6 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "restart_cmd": "start steam://run/2483190",
     "mastery_scan_pages": 100,
     "manufacturer_scan_steps": 50,
+    "log_level": "info",
     "calc_a": "",
     "calc_b": "81700",
     "calc_c": "30",

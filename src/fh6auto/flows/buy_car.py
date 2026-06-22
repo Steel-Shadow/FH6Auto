@@ -16,12 +16,14 @@ class BuyCarFlow:
     # --- 模块：买车 ---
     # ==========================================
     def logic_buy_car(self, target_count):
+        start_count = self.app.state.car_counter
         if self.app.state.car_counter >= target_count:
+            self.app.log("批量买车流程结束：完成 0 次。")
             return True
 
         self.app.state.set_task("批量买车", self.app.state.car_counter, target_count)
 
-        self.app.log("准备验证/进入菜单...")
+        self.app.log("准备验证/进入菜单...", level="debug")
         if not self.app.services.recovery.enter_menu():
             return False
 
@@ -33,7 +35,7 @@ class BuyCarFlow:
             interval=0.4,
         )
         if not pos_collectionjournal:
-            self.app.log("未找到收集簿")
+            self.app.log("未找到收集簿", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_collectionjournal, double=True)
@@ -47,7 +49,7 @@ class BuyCarFlow:
             interval=0.4,
         )
         if not pos_masterexplorer:
-            self.app.log("未找到探索")
+            self.app.log("未找到探索", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_masterexplorer, double=True)
@@ -61,7 +63,7 @@ class BuyCarFlow:
             interval=0.3,
         )
         if not pos_carcollection:
-            self.app.log("未找到车辆收集")
+            self.app.log("未找到车辆收集", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_carcollection, double=True)
@@ -76,7 +78,7 @@ class BuyCarFlow:
             label="消耗品制造商",
         )
         if not manufacturer_pos:
-            self.app.log("未找到制造商")
+            self.app.log("未找到制造商", level="warning")
             return False
 
         self.app.services.input_actions.game_click(manufacturer_pos)
@@ -96,7 +98,7 @@ class BuyCarFlow:
             interval=0.3,
         )
         if not pos_22b:
-            self.app.log("未找到消耗品车辆")
+            self.app.log("未找到消耗品车辆", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_22b, double=True)
@@ -130,4 +132,5 @@ class BuyCarFlow:
             self.app.services.input_actions.hw_press("esc")
             time.sleep(0.8)
 
+        self.app.log(f"批量买车流程结束：完成 {self.app.state.car_counter - start_count} 次。")
         return True
