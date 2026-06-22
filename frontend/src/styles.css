@@ -98,6 +98,15 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(68, 169, 231, 0.16);
 }
 
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+  border-color: #273241;
+  background: #101720;
+  color: #6f7f91;
+  opacity: 0.58;
+}
+
 input[type="checkbox"] {
   accent-color: #40b896;
 }
@@ -267,6 +276,10 @@ label span {
   margin-top: 8px;
 }
 
+.module-card label.disabled span {
+  color: #66758a;
+}
+
 .wheelspin-config {
   display: grid;
   gap: 8px;
@@ -286,6 +299,27 @@ label span {
 
 .wheelspin-use-all {
   padding-bottom: 0;
+}
+
+.use-all-toggle {
+  border: 1px solid #344253;
+  border-radius: 7px;
+  background: rgba(16, 23, 32, 0.78);
+  padding: 0 9px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.use-all-toggle.active {
+  border-color: rgba(64, 184, 150, 0.68);
+  background: rgba(64, 184, 150, 0.13);
+}
+
+.use-all-toggle.active span {
+  color: #7ee0c2;
+  font-weight: 700;
 }
 
 .next-row {

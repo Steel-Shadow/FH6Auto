@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,15 @@ class RaceFlow:
 
     def __init__(self, app: BackendApp) -> None:
         self.app = app
+
+    def _skill_points_per_race(self) -> int:
+        raw_points = self.app.services.config.values.get("calc_d", "50")
+        digits = "".join(ch for ch in str(raw_points) if ch.isdigit())
+        try:
+            points = int(digits)
+        except Exception:
+            points = 50
+        return max(1, points)
 
     # ==========================================
     # --- 模块：跑图前置与循环跑图 ---
@@ -143,22 +153,55 @@ class RaceFlow:
         self.app.log("链接超时", level="warning")
         return False
 
-    def logic_race(self, target_count):
+    def logic_race(self, target_count, *, until_skill_cap: bool = False):
+        until_skill_cap = bool(until_skill_cap)
+        target_count = max(0, int(target_count))
         start_count = self.app.state.race_counter
         sleep = self.app.services.runtime.sleep
 
-        if self.app.state.race_counter >= target_count:
+        if not until_skill_cap and self.app.state.race_counter >= target_count:
             self.app.log("循环跑图流程结束：完成 0 次。")
             return True
 
-        self.app.state.set_task("循环跑图", self.app.state.race_counter, target_count)
+        if until_skill_cap:
+            self.app.state.set_task("循环跑图")
+        else:
+            self.app.state.set_task("循环跑图", self.app.state.race_counter, target_count)
 
         self.app.log("准备验证/进入菜单...", level="debug")
         if not self.app.services.recovery.enter_menu():
             return False
 
+        self.app.log("切换到车辆页，读取当前技术点数...", level="debug")
+        self.app.services.input_actions.hw_press("pagedown", delay=0.15)
+        sleep(0.8)
+
+        current_skill_points = self.app.services.ocr.find_current_skill_points_value()
+        if current_skill_points is None:
+            self.app.log("循环跑图：未能通过 OCR 识别当前技术点数，无法计算实际跑图次数。", level="warning")
+            return False
+
+        capped_skill_points = min(max(0, current_skill_points), 999)
+        points_per_race = self._skill_points_per_race()
+        remaining_user_count = max(0, target_count - self.app.state.race_counter)
+        needed_to_cap = math.ceil(max(0, 999 - capped_skill_points) / points_per_race)
+        planned_count = needed_to_cap if until_skill_cap else min(remaining_user_count, needed_to_cap)
+        effective_target = self.app.state.race_counter + planned_count
+        target_text = "目标模式：跑到技术点上限" if until_skill_cap else f"用户剩余目标 {remaining_user_count} 次"
+        self.app.log(
+            f"循环跑图：当前技术点 {capped_skill_points}/999，单次跑图预计 {points_per_race} 点，"
+            f"{target_text}，达到上限最多还需 {needed_to_cap} 次，预计跑图 {planned_count} 次。"
+        )
+
+        if planned_count <= 0:
+            reason = "当前技术点已达上限" if needed_to_cap <= 0 else "执行次数为 0"
+            self.app.log(f"循环跑图流程结束：完成 0 次。原因：{reason}。")
+            return True
+
+        self.app.state.set_task("循环跑图", self.app.state.race_counter, effective_target)
+
         self.app.log("切换到创意中心...", level="debug")
-        for _ in range(4):
+        for _ in range(3):
             self.app.services.input_actions.hw_press("pagedown", delay=0.15)
             sleep(0.3)
 
@@ -241,8 +284,11 @@ class RaceFlow:
 
         self.app.log("前置完成，开始循环跑图！", level="debug")
 
-        while self.app.state.race_counter < target_count:
-            self.app.log(f"跑图 {self.app.state.race_counter + 1}/{target_count}: 找开始竞赛赛事按钮...", level="debug")
+        while self.app.state.race_counter < effective_target:
+            self.app.log(
+                f"跑图 {self.app.state.race_counter + 1}/{effective_target}: 找开始竞赛赛事按钮...",
+                level="debug",
+            )
 
             pos = None
             for _ in range(120):
@@ -341,7 +387,7 @@ class RaceFlow:
             if not finished:
                 return False
 
-            if self.app.state.race_counter == target_count - 1:
+            if self.app.state.race_counter == effective_target - 1:
                 self.app.services.input_actions.hw_press("enter")
                 sleep(2.0)
             else:
@@ -351,7 +397,7 @@ class RaceFlow:
                 sleep(2.0)
 
             self.app.state.race_counter += 1
-            self.app.state.set_task("循环跑图", self.app.state.race_counter, target_count)
+            self.app.state.set_task("循环跑图", self.app.state.race_counter, effective_target)
 
         self.app.log(f"循环跑图流程结束：完成 {self.app.state.race_counter - start_count} 次。")
         return True

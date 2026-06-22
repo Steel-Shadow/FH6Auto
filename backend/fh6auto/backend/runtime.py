@@ -30,13 +30,17 @@ class FlowCancelled(Exception):
 @dataclass(frozen=True)
 class PipelineOptions:
     race_count: int
+    race_until_skill_cap: bool
     buy_count: int
     mastery_count: int
+    mastery_use_all: bool
     wheelspin_count: int
     normal_wheelspin_count: int
+    wheelspin_use_all: bool
     super_wheelspin_use_all: bool
     normal_wheelspin_use_all: bool
     remove_car_count: int
+    remove_car_use_all: bool
     total_loops: int
     continue_steps: tuple[bool, bool, bool, bool, bool]
     next_steps: tuple[int, int, int, int, int]
@@ -62,13 +66,17 @@ class BackendRuntimeService:
     def _read_pipeline_options(self) -> PipelineOptions:
         return PipelineOptions(
             race_count=self._int_config("race_count", 99, minimum=0),
+            race_until_skill_cap=bool(self.app.services.config.values.get("race_until_skill_cap", False)),
             buy_count=self._int_config("buy_count", 30, minimum=0),
             mastery_count=self._int_config("mastery_count", 30, minimum=0),
+            mastery_use_all=bool(self.app.services.config.values.get("mastery_use_all", False)),
             wheelspin_count=self._int_config("wheelspin_count", 30, minimum=0),
             normal_wheelspin_count=self._int_config("normal_wheelspin_count", 0, minimum=0),
+            wheelspin_use_all=bool(self.app.services.config.values.get("wheelspin_use_all", False)),
             super_wheelspin_use_all=bool(self.app.services.config.values.get("super_wheelspin_use_all", False)),
             normal_wheelspin_use_all=bool(self.app.services.config.values.get("normal_wheelspin_use_all", False)),
             remove_car_count=self._int_config("sc_count", 30, minimum=0),
+            remove_car_use_all=bool(self.app.services.config.values.get("remove_car_use_all", False)),
             total_loops=self._int_config("global_loops", 10, minimum=1),
             continue_steps=(
                 bool(self.app.services.config.values.get("chk_1", False)),
@@ -121,13 +129,17 @@ class BackendRuntimeService:
 
         updates = {
             "race_count": final_races_per_loop,
+            "race_until_skill_cap": False,
             "buy_count": cars_per_loop,
             "mastery_count": cars_per_loop,
+            "mastery_use_all": False,
             "wheelspin_count": cars_per_loop,
             "normal_wheelspin_count": 0,
+            "wheelspin_use_all": False,
             "super_wheelspin_use_all": False,
             "normal_wheelspin_use_all": False,
             "sc_count": cars_per_loop,
+            "remove_car_use_all": False,
             "global_loops": final_loops,
             "calc_a": str(target_cr),
             "calc_b": str(cost_per_car),
@@ -193,20 +205,30 @@ class BackendRuntimeService:
 
                 try:
                     if step_name == "race":
-                        success = self.app.flows.race.logic_race(options.race_count)
+                        success = self.app.flows.race.logic_race(
+                            options.race_count,
+                            until_skill_cap=options.race_until_skill_cap,
+                        )
                     elif step_name == "buy":
                         success = self.app.flows.buy_car.logic_buy_car(options.buy_count)
                     elif step_name == "mastery":
-                        success = self.app.flows.mastery.logic_mastery(options.mastery_count)
+                        success = self.app.flows.mastery.logic_mastery(
+                            options.mastery_count,
+                            use_all=options.mastery_use_all,
+                        )
                     elif step_name == "auto_wheelspin":
                         success = self.app.flows.auto_wheelspin.logic_auto_wheelspin(
                             options.wheelspin_count,
                             normal_count=options.normal_wheelspin_count,
+                            use_all=options.wheelspin_use_all,
                             super_use_all=options.super_wheelspin_use_all,
                             normal_use_all=options.normal_wheelspin_use_all,
                         )
                     elif step_name == "sell":
-                        success = self.app.flows.remove_car.find_and_remove_consumable_car(options.remove_car_count)
+                        success = self.app.flows.remove_car.find_and_remove_consumable_car(
+                            options.remove_car_count,
+                            use_all=options.remove_car_use_all,
+                        )
                 except FlowCancelled:
                     break
                 except Exception as e:

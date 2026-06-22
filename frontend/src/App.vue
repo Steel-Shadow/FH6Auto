@@ -25,11 +25,39 @@ const lockLatestLog = ref(true)
 const logBox = ref(null)
 
 const modules = [
-  { key: 'race', title: '1. 循环跑图', countKey: 'race_count', color: 'blue' },
+  {
+    key: 'race',
+    title: '1. 循环跑图',
+    countKey: 'race_count',
+    useAllKey: 'race_until_skill_cap',
+    useAllLabel: '达到技术点上限',
+    color: 'blue',
+  },
   { key: 'buy', title: '2. 批量买车', countKey: 'buy_count', color: 'green' },
-  { key: 'mastery', title: '3. 熟练度加点', countKey: 'mastery_count', color: 'violet' },
-  { key: 'auto_wheelspin', title: '4. 自动抽奖', countKey: 'wheelspin_count', color: 'cyan' },
-  { key: 'sell', title: '5. 移除车辆', countKey: 'sc_count', color: 'amber' },
+  {
+    key: 'mastery',
+    title: '3. 熟练度加点',
+    countKey: 'mastery_count',
+    useAllKey: 'mastery_use_all',
+    useAllLabel: '用完技术点',
+    color: 'violet',
+  },
+  {
+    key: 'auto_wheelspin',
+    title: '4. 自动抽奖',
+    countKey: 'wheelspin_count',
+    useAllKey: 'wheelspin_use_all',
+    useAllLabel: '用完所有抽奖次数',
+    color: 'cyan',
+  },
+  {
+    key: 'sell',
+    title: '5. 移除车辆',
+    countKey: 'sc_count',
+    useAllKey: 'remove_car_use_all',
+    useAllLabel: '移除全部',
+    color: 'amber',
+  },
 ]
 
 const nextSteps = [
@@ -51,12 +79,10 @@ const wheelspinOptions = [
   {
     label: '超级抽奖',
     countKey: 'wheelspin_count',
-    useAllKey: 'super_wheelspin_use_all',
   },
   {
     label: '普通抽奖',
     countKey: 'normal_wheelspin_count',
-    useAllKey: 'normal_wheelspin_use_all',
   },
 ]
 
@@ -138,9 +164,14 @@ async function refresh() {
 async function saveConfig() {
   busy.value = true
   try {
+    const configToSave = JSON.parse(JSON.stringify(draft))
+    if ('wheelspin_use_all' in configToSave) {
+      configToSave.super_wheelspin_use_all = Boolean(configToSave.wheelspin_use_all)
+      configToSave.normal_wheelspin_use_all = Boolean(configToSave.wheelspin_use_all)
+    }
     const data = await request('/api/config', {
       method: 'PUT',
-      body: JSON.stringify({ config: draft }),
+      body: JSON.stringify({ config: configToSave }),
     })
     copyConfig(data.config)
     dirty.value = false
@@ -297,30 +328,47 @@ watch(
           </button>
         </div>
         <div v-if="module.key === 'auto_wheelspin'" class="wheelspin-config">
-          <div v-for="option in wheelspinOptions" :key="option.countKey" class="wheelspin-row">
-            <label>
-              <span>{{ option.label }}次数</span>
-              <input
-                v-model.number="draft[option.countKey]"
-                type="number"
-                min="0"
-                :disabled="draft[option.useAllKey]"
-                @input="dirty = true"
-              />
-            </label>
-            <label class="check-line wheelspin-use-all">
-              <input v-model="draft[option.useAllKey]" type="checkbox" @change="dirty = true" />
-              <span>用完全部</span>
-            </label>
-          </div>
+          <label
+            v-for="option in wheelspinOptions"
+            :key="option.countKey"
+            class="count-control"
+            :class="{ disabled: draft[module.useAllKey] }"
+          >
+            <span>{{ option.label }}次数</span>
+            <input
+              v-model.number="draft[option.countKey]"
+              type="number"
+              min="0"
+              :disabled="draft[module.useAllKey]"
+              @input="dirty = true"
+            />
+          </label>
+          <label class="check-line use-all-toggle" :class="{ active: draft[module.useAllKey] }">
+            <input v-model="draft[module.useAllKey]" type="checkbox" @change="dirty = true" />
+            <span>{{ module.useAllLabel }}</span>
+          </label>
           <label>
             <span>低价车出售阈值(CR)</span>
             <input v-model.number="draft.wheelspin_sell_threshold" type="number" min="0" step="1000" @input="dirty = true" />
           </label>
         </div>
-        <label v-else>
+        <label v-else class="count-control" :class="{ disabled: module.useAllKey && draft[module.useAllKey] }">
           <span>执行次数</span>
-          <input v-model.number="draft[module.countKey]" type="number" min="0" @input="dirty = true" />
+          <input
+            v-model.number="draft[module.countKey]"
+            type="number"
+            min="0"
+            :disabled="module.useAllKey && draft[module.useAllKey]"
+            @input="dirty = true"
+          />
+        </label>
+        <label
+          v-if="module.useAllKey"
+          class="check-line use-all-toggle"
+          :class="{ active: draft[module.useAllKey] }"
+        >
+          <input v-model="draft[module.useAllKey]" type="checkbox" @change="dirty = true" />
+          <span>{{ module.useAllLabel }}</span>
         </label>
         <label v-if="module.key === 'race'">
           <span>蓝图代码</span>

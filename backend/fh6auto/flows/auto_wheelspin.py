@@ -240,7 +240,7 @@ class AutoWheelspinFlow:
             state = self._detect_wheelspin_footer_state()
 
             if state == "not_in_wheelspin":
-                self.app.log(f"未检测到不在{label}界面，终止{label}流程。", level="warning")
+                self.app.log(f"未检测到不在{label}界面，终止{label}流程。可能是由于抽奖次数为0。", level="warning")
                 return True
 
             elif state == "skip":
@@ -318,9 +318,13 @@ class AutoWheelspinFlow:
         self,
         target_count: int,
         normal_count: int = 0,
+        use_all: bool = False,
         super_use_all: bool = False,
         normal_use_all: bool = False,
     ) -> bool:
+        use_all = bool(use_all)
+        super_use_all = use_all or bool(super_use_all)
+        normal_use_all = use_all or bool(normal_use_all)
         start_count = self.app.state.wheelspin_counter
 
         def finish(reason: str | None = None) -> bool:
@@ -350,8 +354,8 @@ class AutoWheelspinFlow:
             progress_total,
             SUPER_DUPLICATE_POPUP_LIMIT,
         ):
+            # 关闭弹窗，已无剩余超级抽奖
             self.app.services.input_actions.hw_press("enter")
-            return False
 
         if should_run_normal and not self._run_wheelspin_type(
             "普通抽奖",
@@ -361,7 +365,7 @@ class AutoWheelspinFlow:
             progress_total,
             NORMAL_DUPLICATE_POPUP_LIMIT,
         ):
+            # 关闭弹窗，已无剩余抽奖
             self.app.services.input_actions.hw_press("enter")
-            return False
 
         return finish()

@@ -9,12 +9,22 @@ class BuyCarFlow:
     def __init__(self, app: BackendApp) -> None:
         self.app = app
 
+    def _cost_per_car(self) -> int:
+        raw_cost = self.app.services.config.values.get("calc_b", "81700")
+        digits = "".join(ch for ch in str(raw_cost) if ch.isdigit())
+        try:
+            cost = int(digits)
+        except Exception:
+            cost = 81700
+        return max(1, cost)
+
 
     # ==========================================
     # --- 模块：买车 ---
     # ==========================================
     def logic_buy_car(self, target_count):
         sleep = self.app.services.runtime.sleep
+        target_count = max(0, int(target_count))
         start_count = self.app.state.car_counter
         if self.app.state.car_counter >= target_count:
             self.app.log("批量买车流程结束：完成 0 次。")
@@ -25,6 +35,27 @@ class BuyCarFlow:
         self.app.log("准备验证/进入菜单...", level="debug")
         if not self.app.services.recovery.enter_menu():
             return False
+
+        current_cr = self.app.services.ocr.find_current_credit_value()
+        if current_cr is None:
+            self.app.log("批量买车：未能通过 OCR 识别当前 CR，无法计算动态可购买数量。", level="warning")
+            return False
+
+        cost_per_car = self._cost_per_car()
+        remaining_user_count = max(0, target_count - self.app.state.car_counter)
+        affordable_count = current_cr // cost_per_car
+        planned_count = min(remaining_user_count, affordable_count)
+        effective_target = self.app.state.car_counter + planned_count
+        self.app.log(
+            f"批量买车：当前 CR {current_cr:,}，单车成本 CR {cost_per_car:,}，"
+            f"用户剩余目标 {remaining_user_count} 辆，动态最多可买 {affordable_count} 辆，预计购买 {planned_count} 辆。"
+        )
+
+        if planned_count <= 0:
+            self.app.log("批量买车流程结束：完成 0 次。原因：当前 CR 不足以购买车辆。")
+            return True
+
+        self.app.state.set_task("批量买车", self.app.state.car_counter, effective_target)
 
         pos_collectionjournal = self.app.services.image_waits.wait_for_image_sift(
             "collectionjournal.png",
@@ -103,7 +134,7 @@ class BuyCarFlow:
         self.app.services.input_actions.game_click(pos_22b, double=True)
         sleep(1.0)
 
-        while self.app.state.car_counter < target_count:
+        while self.app.state.car_counter < effective_target:
             self.app.services.input_actions.hw_press("space")
             sleep(0.6)
             self.app.services.input_actions.move_to_game_coord(5, 5)
@@ -120,7 +151,7 @@ class BuyCarFlow:
             sleep(0.7)
 
             self.app.state.car_counter += 1
-            self.app.state.set_task("批量买车", self.app.state.car_counter, target_count)
+            self.app.state.set_task("批量买车", self.app.state.car_counter, effective_target)
 
         for _ in range(5):
             self.app.services.input_actions.hw_press("esc")

@@ -11,6 +11,15 @@ class MasteryFlow:
     def __init__(self, app: BackendApp) -> None:
         self.app = app
 
+    def _skill_points_per_car(self) -> int:
+        raw_points = self.app.services.config.values.get("calc_c", "30")
+        digits = "".join(ch for ch in str(raw_points) if ch.isdigit())
+        try:
+            points = int(digits)
+        except Exception:
+            points = 30
+        return max(1, points)
+
     def _check_no_skill_points(self):
         pos = self.app.services.image_matcher.find_image_sift(
             "SPNE.png",
@@ -32,7 +41,9 @@ class MasteryFlow:
     # ==========================================
     # --- 模块：熟练度加点 ---
     # ==========================================
-    def logic_mastery(self, target_count):
+    def logic_mastery(self, target_count, *, use_all: bool = False):
+        target_count = max(0, int(target_count))
+        use_all = bool(use_all)
         sleep = self.app.services.runtime.sleep
         start_count = self.app.state.mastery_counter
 
@@ -41,10 +52,13 @@ class MasteryFlow:
             self.app.log(f"熟练度加点流程结束：完成 {self.app.state.mastery_counter - start_count} 次。{suffix}")
             return True
 
-        if self.app.state.mastery_counter >= target_count:
+        if not use_all and self.app.state.mastery_counter >= target_count:
             return finish()
 
-        self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, target_count)
+        if use_all:
+            self.app.state.set_task("熟练度加点")
+        else:
+            self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, target_count)
         self.app.log("准备验证/进入菜单...", level="debug")
         if not self.app.services.recovery.enter_menu():
             return False
@@ -52,6 +66,28 @@ class MasteryFlow:
         self.app.log("进入车辆与收藏...", level="debug")
         self.app.services.input_actions.hw_press("pagedown", delay=0.15)
         sleep(1.0)
+
+        available_skill_points = self.app.services.ocr.find_current_skill_points_value()
+        if available_skill_points is None:
+            self.app.log("熟练度加点：未能通过 OCR 识别当前技术点数，无法计算动态加点数量。", level="warning")
+            return False
+
+        points_per_car = self._skill_points_per_car()
+        remaining_user_count = max(0, target_count - self.app.state.mastery_counter)
+        affordable_count = available_skill_points // points_per_car
+        planned_count = affordable_count if use_all else min(remaining_user_count, affordable_count)
+        effective_target = self.app.state.mastery_counter + planned_count
+        target_text = "目标模式：用完可用技术点" if use_all else f"用户剩余目标 {remaining_user_count} 辆"
+        self.app.log(
+            f"熟练度加点：当前技术点 {available_skill_points}，单车消耗 {points_per_car} 点，"
+            f"{target_text}，动态最多可加点 {affordable_count} 辆，预计处理 {planned_count} 辆。"
+        )
+
+        if planned_count <= 0:
+            reason = "当前技术点不足以完成一辆车加点" if affordable_count <= 0 else "执行次数为 0"
+            return finish(reason)
+
+        self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, effective_target)
 
         pos_buycar = self.app.services.image_waits.wait_for_image_sift(
             "buy_new_used_cars.png",
@@ -83,7 +119,7 @@ class MasteryFlow:
         self.app.log("进入车辆界面...", level="debug")
         sleep(0.5)
 
-        while self.app.state.mastery_counter < target_count:
+        while self.app.state.mastery_counter < effective_target:
             self.app.log("进入我的车辆.", level="debug")
             self.app.services.input_actions.hw_press("enter")
             sleep(2.0)
@@ -222,7 +258,7 @@ class MasteryFlow:
                         return finish("技能点不足")
 
                 self.app.state.mastery_counter += 1
-                self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, target_count)
+                self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, effective_target)
 
             self.app.services.input_actions.hw_press("esc")
             sleep(1.2)

@@ -5,14 +5,18 @@ from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "race_count": 99,
+    "race_until_skill_cap": False,
     "buy_count": 30,
     "mastery_count": 30,
+    "mastery_use_all": False,
     "wheelspin_count": 30,
     "normal_wheelspin_count": 0,
+    "wheelspin_use_all": False,
     "super_wheelspin_use_all": False,
     "normal_wheelspin_use_all": False,
     "wheelspin_sell_threshold": 100000,
     "sc_count": 30,
+    "remove_car_use_all": False,
     "chk_1": True,
     "chk_2": True,
     "chk_3": True,

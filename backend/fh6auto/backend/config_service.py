@@ -62,8 +62,12 @@ class BackendConfigService:
             "chk_4",
             "chk_5",
             "auto_restart",
+            "race_until_skill_cap",
+            "mastery_use_all",
+            "wheelspin_use_all",
             "super_wheelspin_use_all",
             "normal_wheelspin_use_all",
+            "remove_car_use_all",
         }
         string_keys = {"share_code", "restart_cmd", "calc_a", "calc_b", "calc_c", "calc_d", "log_level"}
 

@@ -12,7 +12,9 @@ class RemoveCarFlow:
     # ==========================================
     # --- 模块：移除车辆 ---
     # ==========================================
-    def find_and_remove_consumable_car(self, target_count):
+    def find_and_remove_consumable_car(self, target_count, *, use_all: bool = False):
+        target_count = max(0, int(target_count))
+        use_all = bool(use_all)
         sleep = self.app.services.runtime.sleep
         start_count = self.app.state.sc_count
 
@@ -21,10 +23,13 @@ class RemoveCarFlow:
             self.app.log(f"移除车辆流程结束：完成 {self.app.state.sc_count - start_count} 次。{suffix}")
             return True
 
-        if self.app.state.sc_count >= target_count:
+        if not use_all and self.app.state.sc_count >= target_count:
             return finish()
 
-        self.app.state.set_task("移除车辆", self.app.state.sc_count, target_count)
+        if use_all:
+            self.app.state.set_task("移除车辆")
+        else:
+            self.app.state.set_task("移除车辆", self.app.state.sc_count, target_count)
 
         self.app.log("准备验证/进入菜单。", level="debug")
         if not self.app.services.recovery.enter_menu():
@@ -99,7 +104,7 @@ class RemoveCarFlow:
         self.app.log("开始删除车辆", level="debug")
 
         not_found_pages = 0
-        while self.app.state.sc_count < target_count:
+        while use_all or self.app.state.sc_count < target_count:
             self.app.log(f"正在使用 3模式 严格扫描当前页面... (连续未找到: {not_found_pages}/5)", level="debug")
 
             pos_target = self.app.services.image_waits.wait_for_car_card(
@@ -173,8 +178,10 @@ class RemoveCarFlow:
             sleep(1.2)
 
             self.app.state.sc_count += 1
-            self.app.state.set_task("移除车辆", self.app.state.sc_count, target_count)
-            self.app.log(f"成功移除车辆！当前进度: {self.app.state.sc_count}/{target_count}", level="debug")
+            progress_total = self.app.state.sc_count if use_all else target_count
+            self.app.state.set_task("移除车辆", self.app.state.sc_count, progress_total)
+            progress_text = f"{self.app.state.sc_count}/全部" if use_all else f"{self.app.state.sc_count}/{target_count}"
+            self.app.log(f"成功移除车辆！当前进度: {progress_text}", level="debug")
 
         # 循环结束，退回上一级
         for _ in range(3):
