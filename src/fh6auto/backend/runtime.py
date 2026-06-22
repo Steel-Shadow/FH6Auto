@@ -23,6 +23,10 @@ PIPELINE_STEPS = ("race", "buy", "mastery", "auto_wheelspin", "sell")
 DEFAULT_RACE_SKILL_POINTS = 50
 
 
+class FlowCancelled(Exception):
+    """Raised when the current automation run is stopped by the user."""
+
+
 @dataclass(frozen=True)
 class PipelineOptions:
     race_count: int
@@ -212,6 +216,8 @@ class BackendRuntimeService:
                         )
                     elif step_name == "sell":
                         success = self.app.flows.remove_car.find_and_remove_consumable_car(options.remove_car_count)
+                except FlowCancelled:
+                    break
                 except Exception as e:
                     self.app.log(f"执行模块 {STEP_LABELS.get(step_name, step_name)} 时异常: {e}")
                     success = False
@@ -315,6 +321,20 @@ class BackendRuntimeService:
     def check_pause(self) -> None:
         while self.app.state.is_paused and self.app.state.is_running:
             time.sleep(0.1)
+
+    def ensure_running(self) -> None:
+        self.check_pause()
+        if not self.app.state.is_running:
+            raise FlowCancelled()
+
+    def sleep(self, duration: float, *, step: float = 0.05) -> None:
+        deadline = time.monotonic() + max(0.0, float(duration))
+        while True:
+            self.ensure_running()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(max(step, 0.01), remaining))
 
     def start_hotkey_listener(self) -> None:
         def hotkey_thread() -> None:

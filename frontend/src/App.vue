@@ -313,6 +313,10 @@ watch(
               <span>用完全部</span>
             </label>
           </div>
+          <label>
+            <span>低价车出售阈值(CR)</span>
+            <input v-model.number="draft.wheelspin_sell_threshold" type="number" min="0" step="1000" @input="dirty = true" />
+          </label>
         </div>
         <label v-else>
           <span>执行次数</span>
@@ -347,10 +351,6 @@ watch(
           <label>
             <span>大循环次数</span>
             <input v-model.number="draft.global_loops" type="number" min="1" @input="dirty = true" />
-          </label>
-          <label>
-            <span>加点扫描页数</span>
-            <input v-model.number="draft.mastery_scan_pages" type="number" min="1" max="100" @input="dirty = true" />
           </label>
           <label>
             <span>制造商扫描步数</span>

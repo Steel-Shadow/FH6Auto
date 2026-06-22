@@ -6,6 +6,7 @@
     "normal_wheelspin_count": 0,
     "super_wheelspin_use_all": false,
     "normal_wheelspin_use_all": false,
+    "wheelspin_sell_threshold": 100000,
     "sc_count": 33,
     "chk_1": true,
     "chk_2": true,
@@ -32,6 +33,5 @@
     "calc_b": "81700",
     "calc_c": "30",
     "calc_d": "50",
-    "mastery_scan_pages": 100,
     "manufacturer_scan_steps": 50
 }

@@ -75,9 +75,11 @@ class RaceFlow:
         )
 
     def _restart_timed_out_race(self) -> None:
-        time.sleep(0.5)
+        sleep = self.app.services.runtime.sleep
+
+        sleep(0.5)
         self.app.services.input_actions.hw_press("esc")
-        time.sleep(1.5)
+        sleep(1.5)
 
         pos_restarta = self.app.services.image_waits.wait_for_image_sift(
             "restarta.png",
@@ -98,42 +100,42 @@ class RaceFlow:
         if pos_restarta:
             self.app.log("找到重开赛事入口，点击重开赛事...", level="debug")
             self.app.services.input_actions.game_click(pos_restarta)
-            time.sleep(1.0)
+            sleep(1.0)
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(4.0)
+            sleep(4.0)
             return
 
         self.app.log("未识别重开赛事入口，尝试键盘菜单路径重开赛事...", level="warning")
         self.app.services.input_actions.hw_press("down")
-        time.sleep(0.3)
+        sleep(0.3)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(1.0)
+        sleep(1.0)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(4.0)
+        sleep(4.0)
 
     def _select_event_by_share_code(self) -> bool:
+        sleep = self.app.services.runtime.sleep
+
         self.app.services.input_actions.hw_press("backspace")
-        time.sleep(0.8)
+        sleep(0.8)
         self.app.services.input_actions.hw_press("up")
-        time.sleep(0.4)
+        sleep(0.4)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(0.8)
+        sleep(0.8)
 
         code_text = "".join(c for c in str(self.app.services.config.values.get("share_code", "")) if c.isdigit())
         for char in code_text:
-            if not self.app.state.is_running:
-                return False
             if char in DIK_CODES:
                 self.app.services.input_actions.hw_press(char, delay=0.05)
-                time.sleep(0.05)
+                sleep(0.05)
 
-        time.sleep(0.4)
+        sleep(0.4)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(0.8)
+        sleep(0.8)
         self.app.services.input_actions.hw_press("down")
-        time.sleep(0.3)
+        sleep(0.3)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(1.5)
+        sleep(1.5)
 
         if self._wait_for_event_loaded():
             return True
@@ -143,6 +145,8 @@ class RaceFlow:
 
     def logic_race(self, target_count):
         start_count = self.app.state.race_counter
+        sleep = self.app.services.runtime.sleep
+
         if self.app.state.race_counter >= target_count:
             self.app.log("循环跑图流程结束：完成 0 次。")
             return True
@@ -156,9 +160,9 @@ class RaceFlow:
         self.app.log("切换到创意中心...", level="debug")
         for _ in range(4):
             self.app.services.input_actions.hw_press("pagedown", delay=0.15)
-            time.sleep(0.3)
+            sleep(0.3)
 
-        time.sleep(0.8)
+        sleep(0.8)
 
         pos_el = self.app.services.image_waits.wait_for_image_sift(
             "eventlab.png",
@@ -173,7 +177,7 @@ class RaceFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_el)
-        time.sleep(1.2)
+        sleep(1.2)
 
         pos_yg = self.app.services.image_waits.wait_for_image_sift(
             "playenent.png",
@@ -187,22 +191,22 @@ class RaceFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_yg)
-        time.sleep(1.5)
+        sleep(1.5)
 
         if not self._select_event_by_share_code():
             return False
 
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(2.0)
+        sleep(2.0)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(2.0)
+        sleep(2.0)
 
         pos_target = self._wait_for_race_car(timeout=2)
 
         if not pos_target:
             self.app.log("未找到目标跑图车辆，重新选择制造商...", level="debug")
             self.app.services.input_actions.hw_press("backspace")
-            time.sleep(1.2)
+            sleep(1.2)
 
             pos_brand = self.app.services.image_waits.scan_for_manufacturer_text(
                 "斯巴鲁",
@@ -214,56 +218,47 @@ class RaceFlow:
                 return False
 
             self.app.services.input_actions.game_click(pos_brand)
-            time.sleep(1.2)
+            sleep(1.2)
 
             for _ in range(20):
-                if not self.app.state.is_running:
-                    return False
-
                 pos_target = self._wait_for_race_car(timeout=2)
                 if pos_target:
                     break
 
                 for _ in range(4):
                     self.app.services.input_actions.hw_press("right", delay=0.08)
-                    time.sleep(0.08)
-                time.sleep(0.4)
+                    sleep(0.08)
+                sleep(0.4)
 
         if not pos_target:
             self.app.log("翻页未能找到目标跑图车辆。", level="warning")
             return False
 
         self.app.services.input_actions.game_click(pos_target)
-        time.sleep(0.5)
+        sleep(0.5)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(4.0)
+        sleep(4.0)
 
         self.app.log("前置完成，开始循环跑图！", level="debug")
 
         while self.app.state.race_counter < target_count:
-            if not self.app.state.is_running:
-                return False
-
             self.app.log(f"跑图 {self.app.state.race_counter + 1}/{target_count}: 找开始竞赛赛事按钮...", level="debug")
 
             pos = None
             for _ in range(120):
-                if not self.app.state.is_running:
-                    return False
-
                 pos = self._wait_for_race_start_button(timeout=0.7)
                 if pos:
                     break
 
                 self.app.services.input_actions.hw_press("down")
-                time.sleep(0.25)
+                sleep(0.25)
 
             if not pos:
                 self.app.log("找不到开始竞赛赛事按钮，退出跑图。", level="warning")
                 return False
 
             self.app.services.input_actions.game_click(pos)
-            time.sleep(4.0)
+            sleep(4.0)
             self.app.services.input_actions.hw_key_down("w")
             self.app.services.input_actions.hw_key_down("up")
 
@@ -276,7 +271,9 @@ class RaceFlow:
 
             driving_keys_held = True  # <--- 【新增】标记油门状态
 
-            while self.app.state.is_running:
+            while True:
+                self.app.services.runtime.ensure_running()
+
                 # ====== 【新增】跑图专用暂停处理逻辑 ======
                 if self.app.state.is_paused:
                     if driving_keys_held:  # 刚进入暂停，松开油门
@@ -284,11 +281,11 @@ class RaceFlow:
                         self.app.services.input_actions.hw_key_up("up")
                         driving_keys_held = False
                     self.app.services.runtime.check_pause()  # 阻塞在此处
+                    self.app.services.runtime.ensure_running()
                     # 从暂停中恢复，如果还没跑完，重新按下油门
-                    if self.app.state.is_running:
-                        self.app.services.input_actions.hw_key_down("w")
-                        self.app.services.input_actions.hw_key_down("up")
-                        driving_keys_held = True
+                    self.app.services.input_actions.hw_key_down("w")
+                    self.app.services.input_actions.hw_key_down("up")
+                    driving_keys_held = True
 
                     # 避免恢复瞬间触发超时，重置计时器
                     race_start_time = time.time()
@@ -326,14 +323,13 @@ class RaceFlow:
                         break
                     last_chk = now
 
-                time.sleep(0.3)
+                sleep(0.3)
 
             # 无论正常结束还是超时，都必须先松开油门和方向
             self.app.services.input_actions.hw_key_up("w")
             self.app.services.input_actions.hw_key_up("up")
 
-            if not self.app.state.is_running:
-                return False
+            self.app.services.runtime.ensure_running()
 
             # ====== 【新增】：执行超时重置操作 ======
             if timeout_triggered:
@@ -347,12 +343,12 @@ class RaceFlow:
 
             if self.app.state.race_counter == target_count - 1:
                 self.app.services.input_actions.hw_press("enter")
-                time.sleep(2.0)
+                sleep(2.0)
             else:
                 self.app.services.input_actions.hw_press("x")
-                time.sleep(0.8)
+                sleep(0.8)
                 self.app.services.input_actions.hw_press("enter")
-                time.sleep(2.0)
+                sleep(2.0)
 
             self.app.state.race_counter += 1
             self.app.state.set_task("循环跑图", self.app.state.race_counter, target_count)

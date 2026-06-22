@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -8,6 +6,8 @@ if TYPE_CHECKING:
 
 
 class MasteryFlow:
+    NOT_FOUND_PAGE_LIMIT = 5
+
     def __init__(self, app: BackendApp) -> None:
         self.app = app
 
@@ -19,11 +19,12 @@ class MasteryFlow:
         )
         if pos:
             self.app.log("检测到技能点不足，准备提前结束熟练度加点。", level="debug")
+            sleep = self.app.services.runtime.sleep
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(0.8)
+            sleep(0.8)
             for _ in range(3):
                 self.app.services.input_actions.hw_press("esc")
-                time.sleep(1.0)
+                sleep(1.0)
             return True
         else:
             return False
@@ -32,6 +33,7 @@ class MasteryFlow:
     # --- 模块：熟练度加点 ---
     # ==========================================
     def logic_mastery(self, target_count):
+        sleep = self.app.services.runtime.sleep
         start_count = self.app.state.mastery_counter
 
         def finish(reason: str | None = None) -> bool:
@@ -43,18 +45,13 @@ class MasteryFlow:
             return finish()
 
         self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, target_count)
-        try:
-            max_scan_pages = int(self.app.services.config.values.get("mastery_scan_pages", 100))
-        except Exception:
-            max_scan_pages = 100
-        max_scan_pages = max(1, min(100, max_scan_pages))
         self.app.log("准备验证/进入菜单...", level="debug")
         if not self.app.services.recovery.enter_menu():
             return False
 
         self.app.log("进入车辆与收藏...", level="debug")
         self.app.services.input_actions.hw_press("pagedown", delay=0.15)
-        time.sleep(1.0)
+        sleep(1.0)
 
         pos_buycar = self.app.services.image_waits.wait_for_image_sift(
             "buy_new_used_cars.png",
@@ -68,9 +65,9 @@ class MasteryFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_buycar)
-        time.sleep(0.8)
+        sleep(0.8)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(2)
+        sleep(2)
 
         pos_bs = self.app.services.image_waits.wait_for_footer_text_ui(
             "选择",
@@ -84,16 +81,14 @@ class MasteryFlow:
 
         self.app.services.input_actions.hw_press("pagedown", delay=0.15)
         self.app.log("进入车辆界面...", level="debug")
-        time.sleep(0.5)
+        sleep(0.5)
 
         while self.app.state.mastery_counter < target_count:
-            if not self.app.state.is_running:
-                return False
             self.app.log("进入我的车辆.", level="debug")
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(2.0)
+            sleep(2.0)
             self.app.services.input_actions.hw_press("backspace")
-            time.sleep(1.0)
+            sleep(1.0)
 
             manufacturer_pos = self.app.services.image_waits.scan_for_manufacturer_text(
                 "斯巴鲁", threshold=0.75, label="消耗品制造商"
@@ -103,27 +98,26 @@ class MasteryFlow:
                 return False
 
             self.app.services.input_actions.game_click(manufacturer_pos)
-            time.sleep(1.0)
-            jump_pages = min(max(0, self.app.state.memory_car_page - 1), max_scan_pages - 1)
+            sleep(1.0)
+            start_page = max(0, int(self.app.state.memory_car_page or 0))
 
-            if jump_pages > 0:
-                self.app.log(f"智能记忆触发：快速跳过前 {jump_pages} 页...", level="debug")
-                for _ in range(jump_pages):
-                    if not self.app.state.is_running:
-                        return False
+            if start_page > 0:
+                self.app.log(f"智能记忆触发：从第 {start_page} 页开始扫描...", level="debug")
+                for _ in range(start_page):
                     for _ in range(4):
                         self.app.services.input_actions.hw_press("right", delay=0.06)
-                        time.sleep(0.1)
-                    time.sleep(0.15)  # 给一点点动画缓冲时间
+                        sleep(0.1)
+                    sleep(0.15)  # 给一点点动画缓冲时间
             pos_target = None
             found_car = False
-            current_page = jump_pages  # 记录当前所在的真实页码
-            scan_pages_left = max_scan_pages - jump_pages
+            current_page = start_page
+            not_found_pages = 0
 
-            # 最大翻页次数扣除已经跳过的页数，避免未识别目标时长时间翻页
-            for _ in range(scan_pages_left):
-                if not self.app.state.is_running:
-                    return False
+            while not_found_pages < self.NOT_FOUND_PAGE_LIMIT:
+                self.app.log(
+                    f"扫描全新消耗品车辆... (连续未找到: {not_found_pages}/{self.NOT_FOUND_PAGE_LIMIT})",
+                    level="debug",
+                )
                 pos_target = self.app.services.image_waits.wait_for_car_card(
                     "newCC.png",
                     required_tag_text="全新",
@@ -142,36 +136,37 @@ class MasteryFlow:
                 if pos_target:
                     self.app.services.input_actions.game_click(pos_target)
                     found_car = True
-                    # 记住这次找到车是在哪一页
                     self.app.state.memory_car_page = current_page
                     self.app.log(f"锁定目标车辆！已记录当前页码: {current_page}", level="debug")
                     break
 
-                # 翻下一页
+                not_found_pages += 1
+                if not_found_pages >= self.NOT_FOUND_PAGE_LIMIT:
+                    break
+
+                self.app.log(f"当前页面未找到全新车辆，向右翻页寻找... (第 {not_found_pages} 次翻页)", level="debug")
                 for _ in range(4):
                     self.app.services.input_actions.hw_press("right", delay=0.06)
-                    time.sleep(0.1)
-                time.sleep(0.4)
+                    sleep(0.1)
+                sleep(0.4)
                 current_page += 1
             if not found_car:
                 self.app.log(
-                    f"连续扫描 {max_scan_pages} 页仍未找到带 NEW 标记的消耗品车辆，已停止熟练度加点模块以避免反复翻页。",
+                    f"从记忆页码 {start_page} 开始连续翻找 {self.NOT_FOUND_PAGE_LIMIT} 页仍未找到全新消耗品车辆，视为车辆已全部处理完毕。",
                     level="debug",
                 )
                 self.app.state.memory_car_page = 0  # 没找到说明车刷完了，清零记忆
                 for _ in range(2):
-                    if not self.app.state.is_running:
-                        return False
                     self.app.services.input_actions.hw_press("esc")
-                    time.sleep(0.8)
+                    sleep(0.8)
                 return finish("未找到全新消耗品车辆")
-            time.sleep(0.5)
+            sleep(0.5)
             self.app.log("确认上车并驾驶当前车辆...", level="debug")
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(1.0)
+            sleep(1.0)
             self.app.services.input_actions.hw_press("enter")
 
-            time.sleep(10.0)
+            sleep(10.0)
             pos_drive = self.app.services.image_waits.wait_for_footer_text_ui(
                 "驾驶",
                 region=self.app.services.game_window.regions["下"],
@@ -183,7 +178,7 @@ class MasteryFlow:
                 return False
 
             self.app.services.input_actions.hw_press("esc")
-            time.sleep(1.0)
+            sleep(1.0)
 
             pos_sjy = self.app.services.image_waits.wait_for_menu_text_ui(
                 "升级与调校",
@@ -203,7 +198,7 @@ class MasteryFlow:
                 self.app.log("未找到车辆专精", level="warning")
                 return False
             self.app.services.input_actions.game_click(pos_mastery)
-            time.sleep(1.0)
+            sleep(1.0)
 
             pos_exp = self.app.services.image_matcher.find_image_sift(
                 "EXPwU.png",
@@ -214,17 +209,15 @@ class MasteryFlow:
                 self.app.log("该车辆技能已点过，跳过计数", level="debug")
             else:
                 self.app.services.input_actions.hw_press("enter")
-                time.sleep(1.2)
+                sleep(1.2)
                 if self._check_no_skill_points():
                     return finish("技能点不足")
 
                 for dk in self.app.services.config.values["skill_dirs"]:
-                    if not self.app.state.is_running:
-                        return False
                     self.app.services.input_actions.hw_press(dk)
-                    time.sleep(0.2)
+                    sleep(0.2)
                     self.app.services.input_actions.hw_press("enter")
-                    time.sleep(1.2)
+                    sleep(1.2)
                     if self._check_no_skill_points():
                         return finish("技能点不足")
 
@@ -232,13 +225,13 @@ class MasteryFlow:
                 self.app.state.set_task("熟练度加点", self.app.state.mastery_counter, target_count)
 
             self.app.services.input_actions.hw_press("esc")
-            time.sleep(1.2)
+            sleep(1.2)
             self.app.services.input_actions.hw_press("esc")
-            time.sleep(0.8)
+            sleep(0.8)
             self.app.services.input_actions.hw_press("up", delay=0.15)
-            time.sleep(0.8)
+            sleep(0.8)
         self.app.services.input_actions.hw_press("esc")
-        time.sleep(1.2)
+        sleep(1.2)
         self.app.services.input_actions.hw_press("esc")
-        time.sleep(1.2)
+        sleep(1.2)
         return finish()

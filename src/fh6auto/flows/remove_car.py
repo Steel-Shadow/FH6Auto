@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,6 +13,7 @@ class RemoveCarFlow:
     # --- 模块：移除车辆 ---
     # ==========================================
     def find_and_remove_consumable_car(self, target_count):
+        sleep = self.app.services.runtime.sleep
         start_count = self.app.state.sc_count
 
         def finish(reason: str | None = None) -> bool:
@@ -33,7 +32,7 @@ class RemoveCarFlow:
 
         # self.app.log("进入菜单页面：车辆")
         self.app.services.input_actions.hw_press("pagedown", delay=0.15)
-        time.sleep(1.0)
+        sleep(1.0)
 
         pos_buycar = self.app.services.image_matcher.find_image_sift(
             "buy_new_used_cars.png",
@@ -47,9 +46,9 @@ class RemoveCarFlow:
         self.app.services.input_actions.game_click(pos_buycar)
         # 点击“购买新车与二手车”
         self.app.services.input_actions.move_to_game_coord(5, 5)
-        time.sleep(0.8)
+        sleep(0.8)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(1)
+        sleep(1)
 
         pos_bs = self.app.services.image_waits.wait_for_footer_text_ui(
             "选择",
@@ -61,13 +60,13 @@ class RemoveCarFlow:
 
         # 进入“我的车辆”
         self.app.services.input_actions.hw_press("pagedown")
-        time.sleep(1.0)
+        sleep(1.0)
         self.app.services.input_actions.hw_press("enter")
-        time.sleep(2.0)
+        sleep(2.0)
 
         # 筛选
         self.app.services.input_actions.hw_press("y")
-        time.sleep(1.0)
+        sleep(1.0)
 
         pos_repeat = self.app.services.image_waits.wait_for_menu_text_ui(
             "重复项",
@@ -80,9 +79,9 @@ class RemoveCarFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_repeat)
-        time.sleep(0.5)
+        sleep(0.5)
         self.app.services.input_actions.hw_press("esc")
-        time.sleep(0.5)
+        sleep(0.5)
 
         # 切换到消耗品制造商
         self.app.log("切换到消耗品制造商...", level="debug")
@@ -95,14 +94,12 @@ class RemoveCarFlow:
             return False
 
         self.app.services.input_actions.game_click(manufacturer_pos)
-        time.sleep(1.0)
+        sleep(1.0)
 
         self.app.log("开始删除车辆", level="debug")
 
         not_found_pages = 0
         while self.app.state.sc_count < target_count:
-            if not self.app.state.is_running:
-                return False
             self.app.log(f"正在使用 3模式 严格扫描当前页面... (连续未找到: {not_found_pages}/5)", level="debug")
 
             pos_target = self.app.services.image_waits.wait_for_car_card(
@@ -128,15 +125,15 @@ class RemoveCarFlow:
                 self.app.log(f"当前页面未找到，向右翻页寻找... (第 {not_found_pages} 次翻页)", level="debug")
                 for _ in range(4):
                     self.app.services.input_actions.hw_press("right", delay=0.06)
-                    time.sleep(0.1)
-                time.sleep(0.4)
+                    sleep(0.1)
+                sleep(0.4)
                 continue
             # ====== 找到了目标车辆，重置翻页计数器 ======
             not_found_pages = 0
 
             self.app.log("精准锁定目标车辆，执行点击...", level="debug")
             self.app.services.input_actions.game_click(pos_target)
-            time.sleep(1.5)  # 等待点击后的反应
+            sleep(1.5)  # 等待点击后的反应
 
             # 若该车在点击前已经被选中，则会直接弹出“选择操作”菜单，否则会将列表车辆列表先滑动到指定位置
             pos_cancel = self.app.services.ocr.find_footer_text_ui("取消")
@@ -166,14 +163,14 @@ class RemoveCarFlow:
                 self.app.log("找不到移除按钮", level="warning")
                 return False
 
-            time.sleep(0.8)  # 等待“你确定要移除吗”的确认弹窗
+            sleep(0.8)  # 等待“你确定要移除吗”的确认弹窗
 
             # 确认移除操作 (按向下选"嗯"，然后回车)
             self.app.log("确认移除...", level="debug")
             self.app.services.input_actions.hw_press("down")
-            time.sleep(0.3)
+            sleep(0.3)
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(1.2)
+            sleep(1.2)
 
             self.app.state.sc_count += 1
             self.app.state.set_task("移除车辆", self.app.state.sc_count, target_count)
@@ -181,9 +178,7 @@ class RemoveCarFlow:
 
         # 循环结束，退回上一级
         for _ in range(3):
-            if not self.app.state.is_running:
-                return False
             self.app.services.input_actions.hw_press("esc")
-            time.sleep(1.0)
+            sleep(1.0)
 
         return finish()

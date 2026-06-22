@@ -30,6 +30,7 @@ class InputActionsService:
     # --- 核心操作与流程控制 ---
     # ==========================================
     def hw_key_down(self, key):
+        self.app.services.runtime.ensure_running()
         self.controller.key_down(key)
 
 
@@ -38,20 +39,19 @@ class InputActionsService:
 
 
     def hw_press(self, key, delay=0.08):
-        self.app.services.runtime.check_pause()  # <--- 【新增】如果正在暂停，脚本会在此处无限等待直到恢复
-        if not self.app.state.is_running:
-            return
+        self.app.services.runtime.ensure_running()
         self.controller.press(key, delay=delay)
 
 
     # 副屏支持
     def hw_mouse_move(self, x, y):
+        self.app.services.runtime.ensure_running()
         self.controller.mouse_move(x, y)
 
 
     def game_click(self, pos, double=False):
-        self.app.services.runtime.check_pause()  # <--- 【新增】拦截鼠标点击
-        if not self.app.state.is_running or not pos:
+        self.app.services.runtime.ensure_running()
+        if not pos:
             return
         self.controller.click(pos, double=double)
 
@@ -61,6 +61,7 @@ class InputActionsService:
         将鼠标移动到以【游戏窗口左上角】为起点的 (x, y) 坐标。
         例如传入 (5, 5)，就会移动到游戏内左上角 5 像素的安全位置。
         """
+        self.app.services.runtime.ensure_running()
         self.controller.move_to_game_coord(x, y)
 
 

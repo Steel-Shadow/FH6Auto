@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,6 +14,7 @@ class BuyCarFlow:
     # --- 模块：买车 ---
     # ==========================================
     def logic_buy_car(self, target_count):
+        sleep = self.app.services.runtime.sleep
         start_count = self.app.state.car_counter
         if self.app.state.car_counter >= target_count:
             self.app.log("批量买车流程结束：完成 0 次。")
@@ -39,7 +38,7 @@ class BuyCarFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_collectionjournal, double=True)
-        time.sleep(1.0)
+        sleep(1.0)
 
         pos_masterexplorer = self.app.services.image_waits.wait_for_image_sift(
             "masterexplorer.png",
@@ -53,7 +52,7 @@ class BuyCarFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_masterexplorer, double=True)
-        time.sleep(0.6)
+        sleep(0.6)
 
         pos_carcollection = self.app.services.image_waits.wait_for_image_sift(
             "carcollection.png",
@@ -67,10 +66,10 @@ class BuyCarFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_carcollection, double=True)
-        time.sleep(1.0)
+        sleep(1.0)
 
         self.app.services.input_actions.hw_press("backspace")
-        time.sleep(0.5)
+        sleep(0.5)
 
         manufacturer_pos = self.app.services.image_waits.scan_for_manufacturer_text(
             "斯巴鲁",
@@ -82,9 +81,9 @@ class BuyCarFlow:
             return False
 
         self.app.services.input_actions.game_click(manufacturer_pos)
-        time.sleep(0.8)
+        sleep(0.8)
         self.app.services.input_actions.hw_press("down")
-        time.sleep(0.4)
+        sleep(0.4)
 
         pos_22b = self.app.services.image_waits.wait_for_car_card(
             "consumablecar.png",
@@ -102,35 +101,30 @@ class BuyCarFlow:
             return False
 
         self.app.services.input_actions.game_click(pos_22b, double=True)
-        time.sleep(1.0)
+        sleep(1.0)
 
         while self.app.state.car_counter < target_count:
-            if not self.app.state.is_running:
-                return False
-
             self.app.services.input_actions.hw_press("space")
-            time.sleep(0.6)
+            sleep(0.6)
             self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("down")
-            time.sleep(0.2)
+            sleep(0.2)
             self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(0.6)
+            sleep(0.6)
             self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(0.6)
+            sleep(0.6)
             self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("enter")
-            time.sleep(0.7)
+            sleep(0.7)
 
             self.app.state.car_counter += 1
             self.app.state.set_task("批量买车", self.app.state.car_counter, target_count)
 
         for _ in range(5):
-            if not self.app.state.is_running:
-                return False
             self.app.services.input_actions.hw_press("esc")
-            time.sleep(0.8)
+            sleep(0.8)
 
         self.app.log(f"批量买车流程结束：完成 {self.app.state.car_counter - start_count} 次。")
         return True

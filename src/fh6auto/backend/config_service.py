@@ -58,6 +58,7 @@ class BackendConfigService:
             "mastery_count",
             "wheelspin_count",
             "normal_wheelspin_count",
+            "wheelspin_sell_threshold",
             "sc_count",
             "next_1",
             "next_2",
@@ -65,7 +66,6 @@ class BackendConfigService:
             "next_4",
             "next_5",
             "global_loops",
-            "mastery_scan_pages",
             "manufacturer_scan_steps",
         }
         bool_keys = {
@@ -85,7 +85,7 @@ class BackendConfigService:
                 continue
             if key in int_keys:
                 try:
-                    normalized[key] = int(value)
+                    normalized[key] = max(0, int(value)) if key == "wheelspin_sell_threshold" else int(value)
                 except Exception:
                     continue
             elif key in bool_keys:
