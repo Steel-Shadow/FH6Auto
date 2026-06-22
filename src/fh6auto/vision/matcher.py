@@ -57,64 +57,6 @@ class ImageMatcherService:
         self.sift_feature_cache = {}
         self._tag_contour_cache: dict[str, tuple[np.ndarray, tuple[int, int, int, int]] | None] = {}
 
-    def find_any_image_gray(self, image_list, region=None, threshold=0.75, fast_mode=True, invert_mode=False):
-        """用灰度模板在当前画面中查找任意图片，可同时匹配反相模板。"""
-        if not self.app.state.is_running:
-            return None
-        try:
-            screen_bgr = self.app.services.image_cache.capture_region(region)
-            screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
-            scales_to_try = self.app.services.image_cache.get_scales_to_try(fast_mode=fast_mode)
-            offset_x = int(region[0]) if region else 0
-            offset_y = int(region[1]) if region else 0
-
-            for image_path in image_list:
-                template_raw = self.app.services.image_cache.load_template_gray(image_path)
-                if template_raw is None:
-                    continue
-
-                for scale in scales_to_try:
-                    template = template_raw
-                    if scale != 1.0:
-                        template = cv2.resize(
-                            template,
-                            None,
-                            fx=scale,
-                            fy=scale,
-                            interpolation=cv2.INTER_AREA,
-                        )
-
-                    height, width = template.shape[:2]
-                    if height < 5 or width < 5 or height > screen_gray.shape[0] or width > screen_gray.shape[1]:
-                        continue
-
-                    variants = [("原图", template)]
-                    if invert_mode:
-                        variants.append(("反相", 255 - template))
-
-                    for mode, candidate in variants:
-                        result = cv2.matchTemplate(screen_gray, candidate, cv2.TM_CCOEFF_NORMED)
-                        _, score, _, location = cv2.minMaxLoc(result)
-                        if score < threshold:
-                            continue
-
-                        pos = (
-                            location[0] + width // 2 + offset_x,
-                            location[1] + height // 2 + offset_y,
-                        )
-                        self.last_positions[image_path] = pos
-                        self.app.log(
-                            f"[GrayMatchAny] 命中: {image_path} | 模式: {mode} | "
-                            f"灰度得分: {score:.3f} (阈值 {threshold}) | 缩放比: {scale:.3f}",
-                            level="debug",
-                        )
-                        return pos
-
-            return None
-        except Exception as e:
-            self.app.log(f"find_any_image_gray 异常: {e}", level="warning")
-            return None
-
     @staticmethod
     def _crop_ratio(img, x1, y1, x2, y2):
         h, w = img.shape[:2]

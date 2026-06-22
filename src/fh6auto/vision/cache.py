@@ -29,7 +29,6 @@ class ImageCacheService:
         self.template_cache = {}
         self.scaled_template_cache = {}
         self.file_template_cache = {}
-        self.template_gray_cache = {}
         self.text_ui_template_cache = {}
 
 
@@ -48,16 +47,6 @@ class ImageCacheService:
             self.template_cache[cache_key] = tpl
         return tpl, actual_path
 
-
-    def load_template_gray(self, template_path):
-        actual_path = get_img_path(template_path)
-        cache_key = ("gray", actual_path)
-        if cache_key in self.template_gray_cache:
-            return self.template_gray_cache[cache_key]
-        tpl = cv2.imread(actual_path, cv2.IMREAD_GRAYSCALE)
-        if tpl is not None:
-            self.template_gray_cache[cache_key] = tpl
-        return tpl
 
 
     def get_images_root_dir(self):
@@ -469,136 +458,6 @@ class ImageCacheService:
 
             result = self.score_text_ui_maps(src_text, meta["text"])
             return float(result["score"]) if result else 0.0
-        except Exception:
-            return 0.0
-
-    @staticmethod
-    def crop_foreground_mask(mask, pad=1):
-        ys, xs = np.where(mask > 0)
-        if len(xs) == 0:
-            return None
-
-        h, w = mask.shape[:2]
-        x1 = max(0, int(xs.min()) - pad)
-        y1 = max(0, int(ys.min()) - pad)
-        x2 = min(w, int(xs.max()) + pad + 1)
-        y2 = min(h, int(ys.max()) + pad + 1)
-        return mask[y1:y2, x1:x2]
-
-    def text_foreground_mask_from_template(self, template_path):
-        actual_path = get_img_path(template_path)
-        cache_key = ("text-foreground", actual_path)
-        if cache_key in self.text_ui_template_cache:
-            return self.text_ui_template_cache[cache_key]
-
-        tpl = cv2.imread(actual_path, cv2.IMREAD_UNCHANGED)
-        if tpl is None:
-            return None
-
-        if tpl.ndim == 3 and tpl.shape[2] == 4:
-            gray = cv2.cvtColor(tpl[:, :, :3], cv2.COLOR_BGR2GRAY)
-            alpha = tpl[:, :, 3]
-            mask = ((alpha > 16) & (gray < 220)).astype(np.uint8) * 255
-        else:
-            gray = self._to_gray_any(tpl)
-            if gray is None:
-                return None
-            mask = (gray < 180).astype(np.uint8) * 255
-
-        mask = self.crop_foreground_mask(mask)
-        if mask is None or np.count_nonzero(mask) < 8:
-            return None
-
-        self.text_ui_template_cache[cache_key] = mask
-        return mask
-
-    def text_foreground_mask_from_cell(self, cell_bgr):
-        if cell_bgr is None or cell_bgr.size == 0:
-            return None
-
-        h, w = cell_bgr.shape[:2]
-        if h < 12 or w < 24:
-            return None
-
-        top = max(0, min(h - 1, 5))
-        bottom = max(top + 1, h - 5)
-        left = max(0, min(w - 1, 12))
-        right = max(left + 1, w - 12)
-        inner = cell_bgr[top:bottom, left:right]
-        gray = cv2.cvtColor(inner, cv2.COLOR_BGR2GRAY)
-
-        border_samples = np.concatenate(
-            [
-                gray[:3, :].ravel(),
-                gray[-3:, :].ravel(),
-                gray[:, :3].ravel(),
-                gray[:, -3:].ravel(),
-            ]
-        )
-        background = float(np.median(border_samples))
-        if background > 128:
-            threshold = max(120, background - 70)
-            mask = gray < threshold
-        else:
-            threshold = min(180, background + 70)
-            mask = gray > threshold
-
-        raw = mask.astype(np.uint8) * 255
-        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(raw, 8)
-        clean = np.zeros_like(raw)
-        for idx in range(1, component_count):
-            _, _, comp_w, comp_h, area = stats[idx]
-            if area >= 8 and comp_h >= 5 and comp_w >= 2:
-                clean[labels == idx] = 255
-
-        cropped = self.crop_foreground_mask(clean)
-        if cropped is None or np.count_nonzero(cropped) < 8:
-            return None
-        return cropped
-
-    @staticmethod
-    def _normalize_text_foreground(mask, size=(128, 40)):
-        if mask is None:
-            return None
-
-        target_w, target_h = size
-        h, w = mask.shape[:2]
-        if h <= 0 or w <= 0:
-            return None
-
-        scale = min(target_w / w, target_h / h)
-        resized_w = max(1, int(round(w * scale)))
-        resized_h = max(1, int(round(h * scale)))
-        resized = cv2.resize(mask, (resized_w, resized_h), interpolation=cv2.INTER_AREA)
-        normalized = np.zeros((target_h, target_w), np.uint8)
-        x = (target_w - resized_w) // 2
-        y = (target_h - resized_h) // 2
-        normalized[y : y + resized_h, x : x + resized_w] = (resized > 128).astype(np.uint8) * 255
-        return normalized
-
-    def score_text_foreground_masks(self, candidate_mask, template_mask):
-        try:
-            candidate = self._normalize_text_foreground(candidate_mask)
-            template = self._normalize_text_foreground(template_mask)
-            if candidate is None or template is None:
-                return 0.0
-
-            candidate_bin = candidate > 0
-            template_bin = template > 0
-            union = int((candidate_bin | template_bin).sum())
-            if union == 0:
-                return 0.0
-
-            intersection = int((candidate_bin & template_bin).sum())
-            iou = intersection / union
-
-            kernel = np.ones((2, 2), np.uint8)
-            candidate_dilated = cv2.dilate(candidate_bin.astype(np.uint8), kernel, iterations=1).astype(bool)
-            template_dilated = cv2.dilate(template_bin.astype(np.uint8), kernel, iterations=1).astype(bool)
-            precision = float((candidate_bin & template_dilated).sum()) / max(1, int(candidate_bin.sum()))
-            recall = float((template_bin & candidate_dilated).sum()) / max(1, int(template_bin.sum()))
-            f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
-            return float(0.55 * f1 + 0.45 * iou)
         except Exception:
             return 0.0
 

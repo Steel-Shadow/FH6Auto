@@ -10,16 +10,12 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from fh6auto.bootstrap import prepare_runtime
-
-
-prepare_runtime()
 
 
 FRONTEND_DIR = Path(ROOT_DIR) / "frontend"
@@ -69,8 +65,9 @@ def start_backend(host: str, port: int):
         return None
 
     import uvicorn
-
     from fh6auto.backend.api import app
+
+    prepare_runtime()
 
     config = uvicorn.Config(app, host=host, port=port, log_level="warning")
     server = uvicorn.Server(config)
@@ -103,7 +100,9 @@ def start_frontend_dev(host: str, port: int) -> subprocess.Popen | None:
     return process
 
 
-def resolve_frontend_url(mode: str, backend_host: str, backend_port: int, frontend_port: int) -> tuple[str, subprocess.Popen | None]:
+def resolve_frontend_url(
+    mode: str, backend_host: str, backend_port: int, frontend_port: int
+) -> tuple[str, subprocess.Popen | None]:
     if mode not in {"auto", "dist", "dev"}:
         raise ValueError(f"未知前端模式: {mode}")
 
@@ -121,10 +120,8 @@ def resolve_frontend_url(mode: str, backend_host: str, backend_port: int, fronte
 def show_window(url: str, width: int, height: int) -> None:
     import webview
 
-    from fh6auto.version import CURRENT_VERSION
-
     webview.create_window(
-        title=f"FH6Auto v{CURRENT_VERSION}",
+        title="FH6Auto",
         url=url,
         width=width,
         height=height,
@@ -166,7 +163,6 @@ def main() -> None:
             frontend_process.terminate()
         if backend_server is not None:
             backend_server.should_exit = True
-
 
 
 if __name__ == "__main__":

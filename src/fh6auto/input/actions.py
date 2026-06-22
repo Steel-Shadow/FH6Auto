@@ -15,16 +15,16 @@ pyautogui.FAILSAFE = False
 class InputActionsService:
     def __init__(self, app: BackendApp) -> None:
         self.app = app
-        self.keyboard_mouse_controller = KeyboardMouseController(lambda: self.app.services.game_window.regions["全界面"])
+        self.keyboard_mouse_controller = KeyboardMouseController(
+            lambda: self.app.services.game_window.regions["全界面"]
+        )
         self.controller = self.keyboard_mouse_controller
-
 
     def apply_input_backend(self, log_change=True):
         self.controller = self.keyboard_mouse_controller
         if log_change:
             self.app.log("控制方式已固定为：键盘鼠标")
             self.app.services.config.save()
-
 
     # ==========================================
     # --- 核心操作与流程控制 ---
@@ -33,28 +33,18 @@ class InputActionsService:
         self.app.services.runtime.ensure_running()
         self.controller.key_down(key)
 
-
     def hw_key_up(self, key):
         self.controller.key_up(key)
-
 
     def hw_press(self, key, delay=0.08):
         self.app.services.runtime.ensure_running()
         self.controller.press(key, delay=delay)
-
-
-    # 副屏支持
-    def hw_mouse_move(self, x, y):
-        self.app.services.runtime.ensure_running()
-        self.controller.mouse_move(x, y)
-
 
     def game_click(self, pos, double=False):
         self.app.services.runtime.ensure_running()
         if not pos:
             return
         self.controller.click(pos, double=double)
-
 
     def move_to_game_coord(self, x, y):
         """
@@ -64,7 +54,5 @@ class InputActionsService:
         self.app.services.runtime.ensure_running()
         self.controller.move_to_game_coord(x, y)
 
-
     def release_all(self):
         self.controller.release_all()
-

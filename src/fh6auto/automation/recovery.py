@@ -169,45 +169,6 @@ class RecoveryService:
         self.app.log("环境重置成功！即将从中断处继续剩余任务。")
         return True
 
-
-    def wait_for_freeroam(self):
-        self.app.log("验证漫游状态...")
-        for i in range(100):
-            if not self.app.state.is_running:
-                return False
-
-            if self.app.services.ocr.find_any_text_ui(
-                ["安娜"],
-                region=self.app.services.game_window.regions["左下"],
-            ):
-                self.app.log("验证成功：已确认处于游戏漫游界面。")
-                return True
-
-            self.app.log(f"重试返回漫游界面({i + 1}/100)")
-            self.app.services.input_actions.hw_press("esc")
-
-            for _ in range(20):
-                if not self.app.state.is_running:
-                    return False
-                time.sleep(0.1)
-
-        self.app.log("多次尝试验证漫游界面失败，尝试进入菜单。")
-        return True
-
-
-    def recover_to_menu(self):
-        self.app.log("开始尝试退回主菜单...")
-        return self.enter_menu()
-
-
-    def is_in_menu(self):
-        return self.app.services.image_matcher.find_image_sift(
-            "collectionjournal.png",
-            region=self.app.services.game_window.regions["左"],
-            min_inliers=20,
-        )
-
-
     def enter_menu(self):
         self.app.log("正在尝试进入主菜单...")
         # 连续尝试 60 次，大概花费 40~60 秒

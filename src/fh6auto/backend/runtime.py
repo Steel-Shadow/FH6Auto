@@ -86,15 +86,6 @@ class BackendRuntimeService:
             ),
         )
 
-    @staticmethod
-    def _wheelspin_progress_total(options: PipelineOptions) -> int:
-        total = 0
-        if not options.super_wheelspin_use_all:
-            total += options.wheelspin_count
-        if not options.normal_wheelspin_use_all:
-            total += options.normal_wheelspin_count
-        return total
-
     def calculate_pipeline(
         self,
         target_cr: int,

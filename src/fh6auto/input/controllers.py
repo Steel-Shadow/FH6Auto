@@ -7,7 +7,6 @@ import pydirectinput
 from .win_input import DIK_CODES, Input, Input_I, KeyBdInput, MouseInput, SendInput
 
 
-LogFn = Callable[[str], None]
 RegionFn = Callable[[], tuple[int, int, int, int]]
 
 class KeyboardMouseController():

@@ -184,13 +184,6 @@ class OcrService:
         return self.recognize_line(cell_bgr, min_score=min_score)
 
     @staticmethod
-    def crop_region(img: np.ndarray, region: tuple[int, int, int, int] | None) -> np.ndarray:
-        if region is None:
-            return img
-        x, y, w, h = map(int, region)
-        return img[y : y + h, x : x + w]
-
-    @staticmethod
     def _region_offset(region) -> Point:
         return (int(region[0]), int(region[1])) if region else (0, 0)
 

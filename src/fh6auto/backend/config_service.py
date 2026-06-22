@@ -33,19 +33,6 @@ class BackendConfigService:
         self.app.log("配置已保存。")
         return self.snapshot()
 
-    def add_skill_dir(self, direction: str) -> None:
-        skill_dirs = list(self.values.get("skill_dirs", []))
-        skill_dirs.append(direction)
-        self.values["skill_dirs"] = self._valid_skill_dirs(skill_dirs)
-        self.save()
-
-    def clear_skill_dir(self) -> None:
-        self.values["skill_dirs"] = []
-        self.save()
-
-    def update_skill_grid(self) -> None:
-        self.values["skill_dirs"] = self._valid_skill_dirs(self.values.get("skill_dirs", []))
-
     def snapshot(self) -> dict[str, Any]:
         return self.values.copy()
 

@@ -263,18 +263,18 @@ class RaceFlow:
             self.app.services.input_actions.hw_key_down("up")
 
             # 初始化各类计时器
-            race_start_time = time.time()  # 新增：记录跑图发车时间
+            race_start_time = time.time()
             last_like_chk = time.time()
             last_chk = 0
             finished = False
             timeout_triggered = False  # 标记是否触发超时
 
-            driving_keys_held = True  # <--- 【新增】标记油门状态
+            driving_keys_held = True  # 标记油门状态
 
             while True:
                 self.app.services.runtime.ensure_running()
 
-                # ====== 【新增】跑图专用暂停处理逻辑 ======
+                # ====== 跑图专用暂停处理逻辑 ======
                 if self.app.state.is_paused:
                     if driving_keys_held:  # 刚进入暂停，松开油门
                         self.app.services.input_actions.hw_key_up("w")
@@ -331,7 +331,7 @@ class RaceFlow:
 
             self.app.services.runtime.ensure_running()
 
-            # ====== 【新增】：执行超时重置操作 ======
+            # ====== 执行超时重置操作 ======
             if timeout_triggered:
                 self._restart_timed_out_race()
                 # 【关键】：直接跳过下方的结算流程，回到最外层 while 重新找 start.png（并且本次不计入 race_counter）

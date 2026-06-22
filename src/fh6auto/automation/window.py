@@ -46,7 +46,7 @@ class GameWindowService:
     # ==========================================
     # --- 逻辑保障 ---
     # ==========================================
-    # 【新增】：强制切换英文键盘与关闭中文状态
+    # 强制切换英文键盘与关闭中文状态
     def set_english_input(self):
         try:
             hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -111,7 +111,7 @@ class GameWindowService:
 
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
                 time.sleep(0.5)
-                # ====== 【新增】：强制关闭中文输入法 ======
+                # ====== 强制关闭中文输入法 ======
                 self.set_english_input()
                 # ==========================================
                 try:

@@ -129,22 +129,6 @@ class ImageWaitsService:
             interval=interval,
         )
 
-    def wait_for_text_ui(
-        self,
-        target_text,
-        region=None,
-        threshold=0.65,
-        timeout: float = 30,
-        interval: float = 0.3,
-    ):
-        return self.wait_for_any_text_ui(
-            [target_text],
-            region=region,
-            threshold=threshold,
-            timeout=timeout,
-            interval=interval,
-        )
-
     def wait_for_menu_text_ui(
         self,
         target_text,

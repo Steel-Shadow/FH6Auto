@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -21,7 +22,9 @@ def get_internal_dir() -> str:
 APP_DIR = get_app_dir()
 INTERNAL_DIR = get_internal_dir()
 USER_CONFIG_FILE = os.path.join(APP_DIR, "config.json")
-LOG_FILE = os.path.join(APP_DIR, "bot_log.txt")
+RUN_STARTED_AT = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+LOG_DIR = os.path.join(APP_DIR, "log")
+LOG_FILE = os.path.join(LOG_DIR, f"{RUN_STARTED_AT}.log")
 CACHE_DIR = os.path.join(APP_DIR, "cache")
 TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
 TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
@@ -66,15 +69,3 @@ def get_img_path(filename: str) -> str:
         return int_path
 
     return filename
-
-
-def get_asset_path(*parts: str) -> str | None:
-    asset_path = os.path.join(INTERNAL_DIR, "assets", *parts)
-    if os.path.exists(asset_path):
-        return asset_path
-
-    dev_asset_path = os.path.join(get_app_dir(), "assets", *parts)
-    if os.path.exists(dev_asset_path):
-        return dev_asset_path
-
-    return None

@@ -3,15 +3,25 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 from typing import Any, Literal
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from importlib.metadata import version
+from packaging.version import InvalidVersion
 import uvicorn
 
 from .app import BackendApp
+
+
+def get_version() -> str:
+    """Read the package version managed by uv via pyproject metadata."""
+    PACKAGE_NAME = "fh6auto"
+    try:
+        return version(PACKAGE_NAME)
+    except InvalidVersion:
+        return "0.0.0"
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -35,7 +45,7 @@ class CalculateRequest(BaseModel):
 
 
 backend_app = BackendApp()
-app = FastAPI(title="FH6Auto Backend", version="1.0.0")
+app = FastAPI(title="FH6Auto Backend", version=get_version())
 
 app.add_middleware(
     CORSMiddleware,
