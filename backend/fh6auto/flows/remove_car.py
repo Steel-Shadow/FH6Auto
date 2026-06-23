@@ -69,22 +69,15 @@ class RemoveCarFlow:
         self.app.services.input_actions.hw_press("enter")
         sleep(2.0)
 
-        # 筛选
+        # 筛选重复项
         self.app.services.input_actions.hw_press("y")
         sleep(1.0)
-
-        pos_repeat = self.app.services.image_waits.wait_for_menu_text_ui(
-            "重复项",
-            region=self.app.services.game_window.regions["全界面"],
-            timeout=1.0,
-        )
-
-        if not pos_repeat:
-            self.app.log("未找到重复项", level="warning")
-            return False
-
-        self.app.services.input_actions.game_click(pos_repeat)
-        sleep(0.5)
+        self.app.services.input_actions.hw_press("down")
+        sleep(0.1)
+        self.app.services.input_actions.hw_press("down")
+        sleep(0.1)
+        self.app.services.input_actions.hw_press("enter")
+        sleep(0.1)
         self.app.services.input_actions.hw_press("esc")
         sleep(0.5)
 
@@ -111,7 +104,6 @@ class RemoveCarFlow:
                 "removecarobject.png",
                 excluded_tag_text="全新",
                 exclude_driving=True,
-                region=self.app.services.game_window.regions["全界面"],
                 final_threshold=0.80,
                 title_threshold=0.74,
                 pi_threshold=0.84,
@@ -180,7 +172,9 @@ class RemoveCarFlow:
             self.app.state.sc_count += 1
             progress_total = self.app.state.sc_count if use_all else target_count
             self.app.state.set_task("移除车辆", self.app.state.sc_count, progress_total)
-            progress_text = f"{self.app.state.sc_count}/全部" if use_all else f"{self.app.state.sc_count}/{target_count}"
+            progress_text = (
+                f"{self.app.state.sc_count}/全部" if use_all else f"{self.app.state.sc_count}/{target_count}"
+            )
             self.app.log(f"成功移除车辆！当前进度: {progress_text}", level="debug")
 
         # 循环结束，退回上一级

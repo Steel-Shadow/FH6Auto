@@ -30,7 +30,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "global_loops": 10,
     "skill_dirs": ["right", "up", "up", "up", "left"],
     "share_code": "659086805",
-    "auto_restart": False,
+    "auto_restart": True,
     "restart_cmd": "start steam://run/2483190",
     "manufacturer_scan_steps": 50,
     "log_level": "info",

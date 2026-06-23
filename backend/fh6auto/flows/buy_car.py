@@ -73,10 +73,7 @@ class BuyCarFlow:
 
         pos_masterexplorer = self.app.services.image_waits.wait_for_image_sift(
             "masterexplorer.png",
-            region=self.app.services.game_window.regions["全界面"],
             min_inliers=20,
-            timeout=30,
-            interval=0.4,
         )
         if not pos_masterexplorer:
             self.app.log("未找到探索", level="warning")
@@ -87,10 +84,6 @@ class BuyCarFlow:
 
         pos_carcollection = self.app.services.image_waits.wait_for_image_sift(
             "carcollection.png",
-            region=self.app.services.game_window.regions["全界面"],
-            min_inliers=20,
-            timeout=30,
-            interval=0.3,
         )
         if not pos_carcollection:
             self.app.log("未找到车辆收集", level="warning")
@@ -118,7 +111,6 @@ class BuyCarFlow:
 
         pos_22b = self.app.services.image_waits.wait_for_car_card(
             "consumablecar.png",
-            region=self.app.services.game_window.regions["全界面"],
             final_threshold=0.80,
             title_threshold=0.74,
             pi_threshold=0.84,

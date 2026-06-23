@@ -31,7 +31,7 @@
         "left"
     ],
     "share_code": "659086805",
-    "auto_restart": false,
+    "auto_restart": true,
     "restart_cmd": "start steam://run/2483190",
     "calc_a": "1000000",
     "calc_b": "81700",

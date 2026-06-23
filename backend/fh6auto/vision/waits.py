@@ -181,13 +181,11 @@ class ImageWaitsService:
             max_steps = 50
 
         max_steps = max(5, min(50, max_steps))
-        full_region = self.app.services.game_window.regions["全界面"]
 
         def wait_for_current_page(timeout):
             return self._wait_for(
                 lambda: self.app.services.ocr.find_manufacturer_text(
                     target_text,
-                    region=full_region,
                     threshold=threshold,
                 ),
                 timeout=timeout,

@@ -23,7 +23,6 @@ class MasteryFlow:
     def _check_no_skill_points(self):
         pos = self.app.services.image_matcher.find_image_sift(
             "SPNE.png",
-            region=self.app.services.game_window.regions["全界面"],
             min_inliers=24,
         )
         if pos:
@@ -157,7 +156,6 @@ class MasteryFlow:
                 pos_target = self.app.services.image_waits.wait_for_car_card(
                     "newCC.png",
                     required_tag_text="全新",
-                    region=self.app.services.game_window.regions["全界面"],
                     final_threshold=0.78,
                     title_threshold=0.72,
                     pi_threshold=0.82,

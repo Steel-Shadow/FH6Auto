@@ -103,10 +103,12 @@ class AutoWheelspinFlow:
 
     def _owned_car_sell_threshold(self) -> int:
         try:
-            threshold = int(self.app.services.config.values.get(
-                "wheelspin_sell_threshold",
-                DEFAULT_OWNED_CAR_SELL_THRESHOLD,
-            ))
+            threshold = int(
+                self.app.services.config.values.get(
+                    "wheelspin_sell_threshold",
+                    DEFAULT_OWNED_CAR_SELL_THRESHOLD,
+                )
+            )
         except Exception:
             threshold = DEFAULT_OWNED_CAR_SELL_THRESHOLD
         return max(0, threshold)
@@ -177,24 +179,12 @@ class AutoWheelspinFlow:
 
     def _find_wheelspin_entry(self, reference_path: str, label: str, timeout: float):
         self.app.log(f"定位{label}入口...", level="debug")
-        pos_wheelspin = self.app.services.image_waits.wait_for_image_sift(
-            reference_path,
-            region=self.app.services.game_window.regions["全界面"],
-            min_inliers=50,
-            ratio=0.75,
-            max_features=2500,
-            timeout=timeout,
-            interval=0.3,
-        )
+        pos_wheelspin = self.app.services.image_matcher.find_image_sift(reference_path)
         if not pos_wheelspin:
             self.app.log(f"未找到{label}入口。", level="warning")
         return pos_wheelspin
 
     def _enter_wheelspin_entry(self, reference_path: str, label: str) -> bool:
-        if not os.path.exists(get_img_path(reference_path)):
-            self.app.log(f"缺少{label}入口参考图：images/{reference_path}", level="warning")
-            return False
-
         pos_wheelspin = self._find_wheelspin_entry(reference_path, label, timeout=1.5)
         if pos_wheelspin:
             self.app.log(f"已在当前页面找到{label}入口。", level="debug")
@@ -278,7 +268,9 @@ class AutoWheelspinFlow:
                 elif completed_count >= target_count:
                     self.app.log(f"{label} {completed_count}/{target_count} 完成，领取奖励后退出。", level="debug")
                 else:
-                    self.app.log(f"{label}机会已用完，当前进度 {completed_count}/{target_count}，领取奖励后结束。", level="debug")
+                    self.app.log(
+                        f"{label}机会已用完，当前进度 {completed_count}/{target_count}，领取奖励后结束。", level="debug"
+                    )
                 self.app.services.input_actions.hw_press("enter")
                 self.app.services.runtime.sleep(1.5)
                 self._clear_owned_car_dialogs(label, duplicate_popup_limit)

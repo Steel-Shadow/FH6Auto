@@ -12,7 +12,6 @@ class RecoveryService:
     def __init__(self, app: BackendApp) -> None:
         self.app = app
 
-
     def restart_game_and_boot(self, force_test=False):
         # 除非点击了测试按钮(force_test)，否则检查设置里是否允许自动重启
         if not force_test:
@@ -60,7 +59,6 @@ class RecoveryService:
             if not passed_screen_1:
                 pos_h6 = self.app.services.image_matcher.find_image_sift(
                     "horizon6.png",
-                    region=self.app.services.game_window.regions["全界面"],
                     min_inliers=8,
                 )
 
@@ -118,7 +116,6 @@ class RecoveryService:
         self.app.log("自动启动超时(5分钟)，放弃抢救。")
         return False
 
-
     def handle_vramne_restart(self):
         self.app.log("!!! 检测到 VRAMNE.png，2秒后强杀游戏，等待10分钟再重启...")
         time.sleep(2.0)
@@ -144,12 +141,10 @@ class RecoveryService:
         self.app.log("10分钟等待结束，准备自动重启游戏...")
         return self.restart_game_and_boot()
 
-
     def check_vramne_during_race(self):
         try:
             pos_vram = self.app.services.image_matcher.find_image_sift(
                 "VRAMNE.png",
-                region=self.app.services.game_window.regions["全界面"],
                 min_inliers=24,
             )
             if pos_vram:
@@ -158,7 +153,6 @@ class RecoveryService:
         except Exception as e:
             self.app.log(f"检测到显存不足: {e}")
             return None
-
 
     def attempt_recovery(self):
         self.app.log("任务执行异常中断，准备执行断点恢复流程...")

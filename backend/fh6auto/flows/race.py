@@ -51,7 +51,6 @@ class RaceFlow:
         return self.app.services.image_waits.wait_for_car_card(
             self.RACE_CAR_TEMPLATE,
             required_tag_path=self.RACE_CAR_FAVORITE_TAG,
-            region=self.app.services.game_window.regions["全界面"],
             timeout=timeout,
             interval=0.25,
             fast_mode=self.RACE_CAR_MATCH_PARAMS["fast_mode"],
@@ -73,9 +72,7 @@ class RaceFlow:
         )
 
     def _find_race_result_screen(self):
-        return self.app.services.image_matcher.find_race_result_table(
-            region=self.app.services.game_window.regions["全界面"]
-        )
+        return self.app.services.image_matcher.find_race_result_table()
 
     def _find_like_author_prompt(self):
         return self.app.services.image_matcher.find_any_image_sift(
@@ -93,18 +90,14 @@ class RaceFlow:
 
         pos_restarta = self.app.services.image_waits.wait_for_image_sift(
             "restarta.png",
-            region=self.app.services.game_window.regions["全界面"],
             min_inliers=6,
             timeout=3.0,
-            interval=0.3,
         )
         if not pos_restarta:
             pos_restarta = self.app.services.image_waits.wait_for_image_sift(
                 "restart.png",
-                region=self.app.services.game_window.regions["全界面"],
                 min_inliers=20,
                 timeout=2.0,
-                interval=0.3,
             )
 
         if pos_restarta:
@@ -209,10 +202,8 @@ class RaceFlow:
 
         pos_el = self.app.services.image_waits.wait_for_image_sift(
             "eventlab.png",
-            region=self.app.services.game_window.regions["全界面"],
             min_inliers=12,
             timeout=5,
-            interval=0.25,
         )
 
         if not pos_el:
@@ -342,7 +333,9 @@ class RaceFlow:
                 now = time.time()
 
                 if now - race_start_time > self.RACE_TIMEOUT_SECONDS:
-                    self.app.log(f"跑图超时(已超过{self.RACE_TIMEOUT_SECONDS:.0f}秒)！触发强制重开赛事逻辑...", level="warning")
+                    self.app.log(
+                        f"跑图超时(已超过{self.RACE_TIMEOUT_SECONDS:.0f}秒)！触发强制重开赛事逻辑...", level="warning"
+                    )
                     timeout_triggered = True
                     break
 
