@@ -31,7 +31,6 @@ class ImageCacheService:
         self.file_template_cache = {}
         self.text_ui_template_cache = {}
 
-
     # ==========================================
     # --- 图像寻找 ---
     # ==========================================
@@ -47,8 +46,6 @@ class ImageCacheService:
             self.template_cache[cache_key] = tpl
         return tpl, actual_path
 
-
-
     def get_images_root_dir(self):
         ext_dir = os.path.join(APP_DIR, "images")
         if os.path.isdir(ext_dir):
@@ -59,7 +56,6 @@ class ImageCacheService:
             return int_dir
 
         return None
-
 
     def get_template_meta(self):
         images_dir = self.get_images_root_dir()
@@ -86,7 +82,6 @@ class ImageCacheService:
 
         return meta_data
 
-
     def is_template_cache_valid(self):
         if not os.path.exists(TEMPLATE_CACHE_FILE) or not os.path.exists(TEMPLATE_META_FILE):
             return False
@@ -99,7 +94,6 @@ class ImageCacheService:
 
         new_meta = self.get_template_meta()
         return cached_meta == new_meta
-
 
     def build_template_file_cache(self):
         self.app.log("开始构建模板缓存文件...")
@@ -146,7 +140,6 @@ class ImageCacheService:
             self.app.log(f"写入模板缓存失败: {e}")
             return False
 
-
     def load_template_file_cache(self):
         try:
             with open(TEMPLATE_CACHE_FILE, "rb") as f:
@@ -157,7 +150,6 @@ class ImageCacheService:
             self.app.log(f"加载模板缓存失败: {e}")
             self.file_template_cache = {}
             return False
-
 
     def prepare_template_cache(self):
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -172,17 +164,34 @@ class ImageCacheService:
             self.scaled_template_cache.clear()
             self.load_template_file_cache()
 
+    def resolve_capture_region(self, region=None):
+        """返回实际截图区域；未指定时默认使用游戏窗口客户区。"""
+        if region is not None:
+            return region
+        try:
+            return self.app.services.game_window.regions.get("全界面")
+        except Exception:
+            return None
+
+    def capture_offset(self, region=None):
+        """返回截图区域左上角的屏幕绝对坐标偏移。"""
+        capture_region = self.resolve_capture_region(region)
+        if capture_region is None:
+            return (0, 0)
+        return (int(capture_region[0]), int(capture_region[1]))
 
     def capture_region(self, region=None, mask_areas=None):
+        """截取指定屏幕区域；未指定时默认截取游戏窗口客户区。"""
+        capture_region = self.resolve_capture_region(region)
         try:
-            if region:
-                x, y, w, h = region
+            if capture_region is not None:
+                x, y, w, h = capture_region
                 bbox = (int(x), int(y), int(x + w), int(y + h))
                 screen = ImageGrab.grab(bbox=bbox, all_screens=True)
             else:
                 screen = ImageGrab.grab(all_screens=True)
         except Exception:
-            screen = pyautogui.screenshot(region=region)
+            screen = pyautogui.screenshot(region=capture_region)
 
         screen_bgr = cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
 
@@ -201,7 +210,6 @@ class ImageCacheService:
                     pass
 
         return screen_bgr
-
 
     def get_scales_to_try(self, fast_mode=True):
         full_region = self.app.services.game_window.regions.get("全界面")
@@ -236,7 +244,6 @@ class ImageCacheService:
         if fast_mode:
             return scales[:8]
         return scales
-
 
     def get_scaled_template(self, template_path, scale):
         actual_path = get_img_path(template_path)
@@ -282,7 +289,6 @@ class ImageCacheService:
         except Exception:
             return None, actual_path
 
-
     def _to_gray_any(self, img):
         if img is None:
             return None
@@ -291,7 +297,6 @@ class ImageCacheService:
         if img.shape[2] == 4:
             return cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2GRAY)
         return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
 
     def to_text_ui_image(self, img):
         """把不同底色/反色文字统一成边缘形状图。"""
@@ -319,7 +324,6 @@ class ImageCacheService:
 
         return edges
 
-
     @staticmethod
     def _content_bbox(mask, pad=2):
         ys, xs = np.where(mask > 0)
@@ -332,7 +336,6 @@ class ImageCacheService:
             min(w, int(xs.max()) + pad + 1),
             min(h, int(ys.max()) + pad + 1),
         )
-
 
     def prepare_text_ui_template(self, template_path, scale):
         actual_path = get_img_path(template_path)
@@ -377,7 +380,6 @@ class ImageCacheService:
         except Exception:
             return None, actual_path
 
-
     @staticmethod
     def _text_shape_score(patch, template):
         patch_bin = patch > 0
@@ -397,7 +399,6 @@ class ImageCacheService:
             return 0.0, precision, recall
 
         return (2 * precision * recall) / (precision + recall), precision, recall
-
 
     def score_text_ui_maps(self, search_text, template_text, top_k=24):
         try:
@@ -448,7 +449,6 @@ class ImageCacheService:
         except Exception:
             return None
 
-
     def match_text_ui_score(self, src_bgr, template_path, scale):
         try:
             src_text = self.to_text_ui_image(src_bgr)
@@ -461,17 +461,14 @@ class ImageCacheService:
         except Exception:
             return 0.0
 
-
     def to_gray_image(self, img):
         return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
 
     def to_edge_image(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (3, 3), 0)
         edge = cv2.Canny(blur, 50, 150)
         return edge
-
 
     def match_template_score(self, src, tpl):
         try:

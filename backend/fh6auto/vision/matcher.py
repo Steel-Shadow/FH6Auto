@@ -57,6 +57,9 @@ class ImageMatcherService:
         self.sift_feature_cache = {}
         self._tag_contour_cache: dict[str, tuple[np.ndarray, tuple[int, int, int, int]] | None] = {}
 
+    def _capture_offset(self, region=None) -> tuple[int, int]:
+        return self.app.services.image_cache.capture_offset(region)
+
     @staticmethod
     def _crop_ratio(img, x1, y1, x2, y2):
         h, w = img.shape[:2]
@@ -867,6 +870,7 @@ class ImageMatcherService:
 
         try:
             screen_bgr = self.app.services.image_cache.capture_region(region, mask_areas=mask_areas)
+            offset_x, offset_y = self._capture_offset(region)
             candidates = []
             template_orig, _ = self.app.services.image_cache.load_template(card_path)
             if template_orig is None:
@@ -888,8 +892,8 @@ class ImageMatcherService:
             if ocr_candidates:
                 best_ocr = ocr_candidates[0]
                 pos = (
-                    int(best_ocr.pos[0] + (region[0] if region else 0)),
-                    int(best_ocr.pos[1] + (region[1] if region else 0)),
+                    int(best_ocr.pos[0] + offset_x),
+                    int(best_ocr.pos[1] + offset_y),
                 )
                 self.last_positions[card_path] = pos
                 spec = best_ocr.spec
@@ -942,8 +946,8 @@ class ImageMatcherService:
                     candidates.append(
                         {
                             "pos": (
-                                int(sift_candidate["pos"][0] + (region[0] if region else 0)),
-                                int(sift_candidate["pos"][1] + (region[1] if region else 0)),
+                                int(sift_candidate["pos"][0] + offset_x),
+                                int(sift_candidate["pos"][1] + offset_y),
                             ),
                             "scores": scores,
                             "sort_key": sift_candidate["sort_key"],
@@ -984,7 +988,10 @@ class ImageMatcherService:
                         )
                     if failed:
                         continue
-                    candidates.append(segment_candidate)
+                    adjusted_candidate = dict(segment_candidate)
+                    px, py = adjusted_candidate["pos"]
+                    adjusted_candidate["pos"] = (int(px + offset_x), int(py + offset_y))
+                    candidates.append(adjusted_candidate)
 
             for scale in (
                 () if candidates or not template_fallback else self.app.services.image_cache.get_scales_to_try(fast_mode=fast_mode)
@@ -1059,8 +1066,8 @@ class ImageMatcherService:
                     candidates.append(
                         {
                             "pos": (
-                                int(x + w // 2 + (region[0] if region else 0)),
-                                int(y + h // 2 + (region[1] if region else 0)),
+                                int(x + w // 2 + offset_x),
+                                int(y + h // 2 + offset_y),
                             ),
                             "scores": scores,
                             "sort_key": (x, y),
@@ -1209,6 +1216,7 @@ class ImageMatcherService:
 
         try:
             screen_bgr = self.app.services.image_cache.capture_region(region)
+            offset_x, offset_y = self._capture_offset(region)
             screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
             sift = cv2.SIFT_create(nfeatures=int(max_features))
             screen_keypoints, screen_descriptors = sift.detectAndCompute(screen_gray, None)
@@ -1238,8 +1246,8 @@ class ImageMatcherService:
             center_x, center_y = best["center"]
 
             pos = (
-                int(round(center_x + (region[0] if region else 0))),
-                int(round(center_y + (region[1] if region else 0))),
+                int(round(center_x + offset_x)),
+                int(round(center_y + offset_y)),
             )
             self.last_positions[best["reference_path"]] = pos
             self.app.log(

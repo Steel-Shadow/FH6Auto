@@ -336,10 +336,21 @@ class BackendRuntimeService:
             time.sleep(0.1)
 
     def debug(self) -> None:
+        is_running = self.app.state.is_running
+        self.app.state.is_running = True
+
         time_start = time.time()
-        output = self.app.services.ocr.find_footer_text_ui("重新开始")
+        output = self.app.services.ocr.find_manufacturer_text("斯巴鲁")
         time_end = time.time()
         self.app.log(f"Debug info: {output}, Time taken: {time_end - time_start}", level="debug")
+
+        # time_start = time.time()
+        # screen_bgr = self.app.services.image_cache.capture_region(self.app.services.game_window.regions["全界面"])
+        # output = self.app.services.ocr._find_manufacturer_cells(screen_bgr)
+        # time_end = time.time()
+        # self.app.log(f"Debug info: {output}, Time taken: {time_end - time_start}", level="debug")
+
+        self.app.state.is_running = is_running
 
     def ensure_running(self) -> None:
         self.check_pause()

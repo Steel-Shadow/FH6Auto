@@ -347,14 +347,12 @@ class OcrService:
 
         return self.recognize_line(cell_bgr, min_score=min_score)
 
-    @staticmethod
-    def _region_offset(region) -> Point:
-        return (int(region[0]), int(region[1])) if region else (0, 0)
+    def _region_offset(self, region) -> Point:
+        return self.app.services.image_cache.capture_offset(region)
 
-    @classmethod
-    def _box_center(cls, box: Box, region=None) -> Point:
+    def _box_center(self, box: Box, region=None) -> Point:
         x, y, w, h = box
-        offset_x, offset_y = cls._region_offset(region)
+        offset_x, offset_y = self._region_offset(region)
         return (int(round(x + w / 2 + offset_x)), int(round(y + h / 2 + offset_y)))
 
     @staticmethod

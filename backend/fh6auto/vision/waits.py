@@ -182,17 +182,10 @@ class ImageWaitsService:
 
         max_steps = max(5, min(50, max_steps))
 
-        def wait_for_current_page(timeout):
-            return self._wait_for(
-                lambda: self.app.services.ocr.find_manufacturer_text(
-                    target_text,
-                    threshold=threshold,
-                ),
-                timeout=timeout,
-                interval=0.1,
-            )
-
-        pos = wait_for_current_page(timeout=1.0)
+        pos = self.app.services.ocr.find_manufacturer_text(
+            target_text,
+            threshold=threshold,
+        )
         if pos:
             self.app.log(f"已在当前页面找到{label}。", level="debug")
             return pos
@@ -210,7 +203,7 @@ class ImageWaitsService:
                 self.app.services.input_actions.hw_press(direction)
                 self._sleep_while_running(0.18)
 
-                pos = wait_for_current_page(timeout=0.35)
+                pos = self.app.services.ocr.find_manufacturer_text(target_text, threshold=threshold)
                 if pos:
                     self.app.log(f"找到{label}：向{direction_label}扫描第 {step + 1} 步。", level="debug")
                     return pos
