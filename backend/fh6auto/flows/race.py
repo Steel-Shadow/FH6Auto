@@ -62,18 +62,6 @@ class RaceFlow:
             tag_threshold=self.RACE_CAR_MATCH_PARAMS["tag_threshold"],
         )
 
-    def _wait_for_race_start_button(self, timeout: float = 0.7):
-        return self.app.services.image_waits.wait_for_image_sift(
-            "start.png",
-            region=self.app.services.game_window.regions["下"],
-            min_inliers=24,
-            timeout=timeout,
-            interval=0.2,
-        )
-
-    def _find_race_result_screen(self):
-        return self.app.services.image_matcher.find_race_result_table()
-
     def _find_like_author_prompt(self):
         return self.app.services.image_matcher.find_any_image_sift(
             ["likeauthor.png", "dislikeauthor.png"],
@@ -281,23 +269,17 @@ class RaceFlow:
                 level="debug",
             )
 
-            pos = None
-            for _ in range(120):
-                pos = self._wait_for_race_start_button(timeout=0.7)
-                if pos:
-                    break
-
-                self.app.services.input_actions.hw_press("down")
-                sleep(0.25)
-
-            if not pos:
-                self.app.log("找不到开始竞赛赛事按钮，退出跑图。", level="warning")
-                return False
+            pos = self.app.services.image_waits.wait_for_image_sift(
+                "start.png",
+                region=self.app.services.game_window.regions["左下"],
+                min_inliers=24,
+                timeout=30,
+                interval=1,
+            )
 
             self.app.services.input_actions.game_click(pos)
             sleep(4.0)
             self.app.services.input_actions.hw_key_down("w")
-            self.app.services.input_actions.hw_key_down("up")
 
             # 初始化各类计时器
             race_start_time = time.time()
@@ -315,13 +297,11 @@ class RaceFlow:
                 if self.app.state.is_paused:
                     if driving_keys_held:  # 刚进入暂停，松开油门
                         self.app.services.input_actions.hw_key_up("w")
-                        self.app.services.input_actions.hw_key_up("up")
                         driving_keys_held = False
                     self.app.services.runtime.check_pause()  # 阻塞在此处
                     self.app.services.runtime.ensure_running()
                     # 从暂停中恢复，如果还没跑完，重新按下油门
                     self.app.services.input_actions.hw_key_down("w")
-                    self.app.services.input_actions.hw_key_down("up")
                     driving_keys_held = True
 
                     # 避免恢复瞬间触发超时，重置计时器
@@ -356,18 +336,16 @@ class RaceFlow:
 
                 # 每1秒检测一次结果页(正常完赛)
                 if now - last_chk >= 1.0:
-                    found_result = self._find_race_result_screen()
+                    found_result = self.app.services.ocr.find_footer_text_ui("重新开始")
                     if found_result:
                         finished = True
                         break
                     last_chk = now
 
-                sleep(0.3)
+                sleep(1.0)
 
-            # 无论正常结束还是超时，都必须先松开油门和方向
+            # 无论正常结束还是超时，都必须先松开油门
             self.app.services.input_actions.hw_key_up("w")
-            self.app.services.input_actions.hw_key_up("up")
-
             self.app.services.runtime.ensure_running()
 
             # ====== 执行超时重置操作 ======

@@ -335,6 +335,12 @@ class BackendRuntimeService:
         while self.app.state.is_paused and self.app.state.is_running:
             time.sleep(0.1)
 
+    def debug(self) -> None:
+        time_start = time.time()
+        output = self.app.services.ocr.find_footer_text_ui("重新开始")
+        time_end = time.time()
+        self.app.log(f"Debug info: {output}, Time taken: {time_end - time_start}", level="debug")
+
     def ensure_running(self) -> None:
         self.check_pause()
         if not self.app.state.is_running:
@@ -356,6 +362,8 @@ class BackendRuntimeService:
                     self.stop_all()
                 elif k == keyboard.Key.f1:
                     self.toggle_pause()
+                elif k == keyboard.Key.f3:
+                    self.debug()
 
             try:
                 with keyboard.Listener(on_press=on_press) as listener:
@@ -364,4 +372,3 @@ class BackendRuntimeService:
                 self.app.log(f"快捷键监听启动失败: {e}")
 
         threading.Thread(target=hotkey_thread, daemon=True).start()
-
