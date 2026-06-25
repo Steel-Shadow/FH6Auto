@@ -42,6 +42,7 @@ class PipelineOptions:
     remove_car_count: int
     remove_car_use_all: bool
     total_loops: int
+    infinite_loops: bool
     continue_steps: tuple[bool, bool, bool, bool, bool]
     next_steps: tuple[int, int, int, int, int]
 
@@ -78,6 +79,7 @@ class BackendRuntimeService:
             remove_car_count=self._int_config("sc_count", 30, minimum=0),
             remove_car_use_all=bool(self.app.services.config.values.get("remove_car_use_all", False)),
             total_loops=self._int_config("global_loops", 10, minimum=1),
+            infinite_loops=bool(self.app.services.config.values.get("global_loop_infinite", False)),
             continue_steps=(
                 bool(self.app.services.config.values.get("chk_1", False)),
                 bool(self.app.services.config.values.get("chk_2", False)),
@@ -141,6 +143,7 @@ class BackendRuntimeService:
             "sc_count": cars_per_loop,
             "remove_car_use_all": False,
             "global_loops": final_loops,
+            "global_loop_infinite": False,
             "calc_a": str(target_cr),
             "calc_b": str(cost_per_car),
             "calc_c": str(sp_per_car),
@@ -170,10 +173,11 @@ class BackendRuntimeService:
         self.app.services.config.save()
         self.app.services.input_actions.apply_input_backend(log_change=False)
         options = self._read_pipeline_options()
+        loop_total = 0 if options.infinite_loops else options.total_loops
 
         self.app.state.reset_counters()
         self.app.state.reset_progress()
-        self.app.state.set_loop(0, options.total_loops)
+        self.app.state.set_loop(0, loop_total)
         self.app.state.mark_started()
         self.app.state.set_task("等待中", 0, 0)
         self.app.state.set_task("初始化中...")
@@ -194,7 +198,8 @@ class BackendRuntimeService:
 
             curr_idx = PIPELINE_STEPS.index(start_step)
             total_loops = options.total_loops
-            self.app.state.set_loop(1, total_loops)
+            loop_total = 0 if options.infinite_loops else total_loops
+            self.app.state.set_loop(1, loop_total)
 
             continuous_failures = 0
             max_recoveries = 10
@@ -258,13 +263,14 @@ class BackendRuntimeService:
                     break
 
                 if next_idx <= curr_idx:
-                    self.app.state.set_loop(self.app.state.loop_current + 1, total_loops)
+                    self.app.state.set_loop(self.app.state.loop_current + 1, loop_total)
 
-                    if self.app.state.loop_current > total_loops:
+                    if not options.infinite_loops and self.app.state.loop_current > total_loops:
                         self.app.log("达到设定的总循环次数，任务结束。")
                         break
 
-                    self.app.log(f"开启新一轮大循环 ({self.app.state.loop_current}/{total_loops})")
+                    loop_label = "∞" if options.infinite_loops else str(total_loops)
+                    self.app.log(f"开启新一轮大循环 ({self.app.state.loop_current}/{loop_label})")
                     self.app.state.reset_counters()
                     self.app.state.set_task("等待中", 0, 0)
 

@@ -11,6 +11,7 @@
     calc_b?: string
     calc_c?: string
     calc_d?: string
+    global_loop_infinite?: boolean
     global_loops?: number
     log_level?: string
     manufacturer_scan_steps?: number
@@ -170,6 +171,22 @@
   const progressText = computed(() => {
     const progress = state.runtime.progress || { current: 0, total: 0 }
     return `${progress.current || 0} / ${progress.total || 0}`
+  })
+
+  const progressPercent = computed(() => {
+    const progress = state.runtime.progress || { current: 0, total: 0 }
+    const total = Number(progress.total || 0)
+    if (total <= 0) return 0
+    const current = Number(progress.current || 0)
+    return Math.min(100, Math.max(0, (current / total) * 100))
+  })
+
+  const progressPercentText = computed(() => `${Math.round(progressPercent.value)}%`)
+
+  const loopTotalText = computed(() => {
+    if (state.runtime.is_running && state.runtime.loop.total <= 0) return '∞'
+    if (draftBoolean('global_loop_infinite')) return '∞'
+    return String(state.runtime.loop.total || 0)
   })
 
   const skillCells = computed(() => {
@@ -393,80 +410,108 @@
 
 <template>
   <v-app>
+    <v-app-bar density="comfortable" elevation="1">
+      <v-app-bar-title>FH6Auto v{{ state.version || '-' }}</v-app-bar-title>
+
+      <template #append>
+        <div class="d-flex align-center ga-2">
+          <v-btn :disabled="busy" variant="tonal" @click="togglePause">
+            {{ state.runtime.is_paused ? '继续' : '暂停' }}
+            <kbd class="shortcut">F1</kbd>
+          </v-btn>
+
+          <v-btn color="error" :disabled="busy" variant="tonal" @click="stopAll">
+            停止
+            <kbd class="shortcut">F2</kbd>
+          </v-btn>
+        </div>
+      </template>
+    </v-app-bar>
+
     <v-main>
-      <v-container class="app-shell" fluid>
-        <v-row align="center" class="mb-3" dense justify="space-between">
+      <v-container class="app-shell py-4" fluid>
+        <v-alert v-if="errorMessage" class="mb-3" type="error" variant="tonal">{{ errorMessage }}</v-alert>
+
+        <v-row align="stretch" class="mb-3">
           <v-col cols="12" md="5">
-            <div class="app-title">FH6Auto</div>
-            <div class="text-medium-emphasis">v{{ state.version || '-' }}</div>
-          </v-col>
+            <v-card class="h-100" variant="outlined">
+              <v-card-text class="d-flex align-center justify-space-between ga-4">
+                <div class="d-flex align-center ga-3 min-w-0">
+                  <v-avatar color="primary" size="40" variant="tonal">
+                    <v-icon icon="mdi-flag-checkered" />
+                  </v-avatar>
 
-          <v-col class="d-flex justify-md-end align-center flex-wrap ga-2" cols="12" md="7">
-            <v-chip :color="statusColor" size="large" variant="tonal">{{ statusLabel }}</v-chip>
+                  <div class="min-w-0">
+                    <div class="text-caption text-medium-emphasis mb-1">当前任务</div>
+                    <div class="text-h6 font-weight-medium text-truncate">{{ state.runtime.current_task || '等待中' }}</div>
+                  </div>
+                </div>
 
-            <v-btn :disabled="busy" variant="tonal" @click="togglePause">
-              {{ state.runtime.is_paused ? '继续' : '暂停' }}
-              <kbd class="shortcut">F1</kbd>
-            </v-btn>
-
-            <v-btn color="error" :disabled="busy" variant="tonal" @click="stopAll">
-              停止
-              <kbd class="shortcut">F2</kbd>
-            </v-btn>
-          </v-col>
-        </v-row>
-
-        <v-row class="mb-3" dense>
-          <v-col cols="12" lg="3" sm="6">
-            <v-card>
-              <v-card-text>
-                <div class="text-caption text-medium-emphasis">当前任务</div>
-                <div class="runtime-value">{{ state.runtime.current_task }}</div>
+                <v-chip :color="statusColor" size="small" variant="tonal">{{ statusLabel }}</v-chip>
               </v-card-text>
             </v-card>
           </v-col>
 
-          <v-col cols="12" lg="3" sm="6">
-            <v-card>
+          <v-col cols="12" md="5">
+            <v-card class="h-100" variant="outlined">
               <v-card-text>
-                <div class="text-caption text-medium-emphasis">任务进度</div>
-                <div class="runtime-value">{{ progressText }}</div>
+                <div class="d-flex align-center justify-space-between ga-4 mb-3">
+                  <div class="d-flex align-center ga-3">
+                    <v-avatar color="primary" size="40" variant="tonal">
+                      <v-icon icon="mdi-progress-check" />
+                    </v-avatar>
+
+                    <div>
+                      <div class="text-caption text-medium-emphasis mb-1">当前进度</div>
+                      <div class="text-h6 font-weight-medium">{{ progressText }}</div>
+                    </div>
+                  </div>
+
+                  <div class="text-right">
+                    <v-chip color="primary" size="small" variant="tonal">{{ progressPercentText }}</v-chip>
+
+                    <div class="text-caption text-medium-emphasis mt-1">
+                      循环 {{ state.runtime.loop.current || 0 }} / {{ loopTotalText }}
+                    </div>
+                  </div>
+                </div>
+
+                <v-progress-linear
+                  color="primary"
+                  height="8"
+                  :model-value="progressPercent"
+                  rounded
+                />
               </v-card-text>
             </v-card>
           </v-col>
 
-          <v-col cols="12" lg="3" sm="6">
-            <v-card>
-              <v-card-text>
-                <div class="text-caption text-medium-emphasis">大循环</div>
+          <v-col cols="12" md="2">
+            <v-card class="h-100" variant="outlined">
+              <v-card-text class="d-flex align-center ga-3">
+                <v-avatar color="secondary" size="40" variant="tonal">
+                  <v-icon icon="mdi-timer-outline" />
+                </v-avatar>
 
-                <div class="runtime-value">{{ state.runtime.loop.current || 0 }} / {{ state.runtime.loop.total || 0 }}
+                <div>
+                  <div class="text-caption text-medium-emphasis mb-1">总耗时</div>
+                  <div class="text-h6 font-weight-medium">{{ elapsedText }}</div>
                 </div>
               </v-card-text>
             </v-card>
           </v-col>
-
-          <v-col cols="12" lg="3" sm="6">
-            <v-card>
-              <v-card-text>
-                <div class="text-caption text-medium-emphasis">总耗时</div>
-                <div class="runtime-value">{{ elapsedText }}</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
         </v-row>
 
-        <v-alert v-if="errorMessage" class="mb-3" type="error" variant="tonal">{{ errorMessage }}</v-alert>
-
-        <v-row class="mb-3" dense>
+        <v-row class="mb-3">
           <v-col
             v-for="(module, index) in modules"
             :key="module.key"
             cols="12"
-            md="6"
-            xl="4"
+            md="4"
+            sm="6"
+            xl="3"
           >
-            <v-card>
+            <v-card class="h-100 d-flex flex-column" variant="outlined">
               <v-card-title class="d-flex align-center justify-space-between ga-2">
                 <span>{{ module.title }}</span>
 
@@ -480,10 +525,10 @@
                 </v-btn>
               </v-card-title>
 
-              <v-card-text>
+              <v-card-text class="flex-grow-1">
                 <template v-if="module.key === 'auto_wheelspin'">
-                  <v-row align="center" dense>
-                    <v-col v-for="option in wheelspinOptions" :key="option.countKey" cols="12" sm="4">
+                  <v-row align="center">
+                    <v-col v-for="option in wheelspinOptions" :key="option.countKey">
                       <v-text-field
                         density="compact"
                         :disabled="draftBoolean(module.useAllKey)"
@@ -495,18 +540,16 @@
                         @update:model-value="setDraftNumber(option.countKey, $event)"
                       />
                     </v-col>
-
-                    <v-col cols="12" sm="4">
-                      <v-checkbox
-                        v-model="draft[module.useAllKey]"
-                        color="success"
-                        density="compact"
-                        hide-details
-                        :label="module.useAllLabel"
-                        @update:model-value="markDirty"
-                      />
-                    </v-col>
                   </v-row>
+
+                  <v-checkbox
+                    v-model="draft[module.useAllKey]"
+                    color="success"
+                    density="compact"
+                    hide-details
+                    :label="module.useAllLabel"
+                    @update:model-value="markDirty"
+                  />
 
                   <v-text-field
                     class="mt-3"
@@ -522,8 +565,8 @@
                 </template>
 
                 <template v-else>
-                  <v-row align="center" dense>
-                    <v-col :cols="module.useAllKey ? 7 : 12">
+                  <v-row align="center">
+                    <v-col>
                       <v-text-field
                         density="compact"
                         :disabled="draftBoolean(module.useAllKey)"
@@ -536,7 +579,7 @@
                       />
                     </v-col>
 
-                    <v-col v-if="module.useAllKey" cols="5">
+                    <v-col v-if="module.useAllKey">
                       <v-checkbox
                         v-model="draft[module.useAllKey]"
                         color="success"
@@ -576,19 +619,20 @@
           </v-col>
         </v-row>
 
-        <v-row class="mb-3" dense>
-          <v-col cols="12" lg="6">
-            <v-card>
+        <v-row class="mb-3">
+          <v-col>
+            <v-card variant="outlined">
               <v-card-title class="d-flex align-center justify-space-between ga-2">
                 <span>运行设置</span>
                 <v-btn color="primary" :disabled="busy || !dirty" variant="tonal" @click="saveConfig">保存配置</v-btn>
               </v-card-title>
 
               <v-card-text>
-                <v-row dense>
-                  <v-col cols="12" sm="4">
+                <v-row>
+                  <v-col cols="12" sm="3">
                     <v-text-field
                       density="compact"
+                      :disabled="draftBoolean('global_loop_infinite')"
                       hide-details
                       label="大循环次数"
                       min="1"
@@ -598,7 +642,18 @@
                     />
                   </v-col>
 
-                  <v-col cols="12" sm="4">
+                  <v-col class="d-flex align-center" cols="12" sm="3">
+                    <v-checkbox
+                      v-model="draft.global_loop_infinite"
+                      color="success"
+                      density="compact"
+                      hide-details
+                      label="无限循环"
+                      @update:model-value="markDirty"
+                    />
+                  </v-col>
+
+                  <v-col cols="12" sm="3">
                     <v-text-field
                       density="compact"
                       hide-details
@@ -611,7 +666,7 @@
                     />
                   </v-col>
 
-                  <v-col cols="12" sm="4">
+                  <v-col cols="12" sm="3">
                     <v-select
                       v-model="draft.log_level"
                       density="compact"
@@ -647,8 +702,8 @@
             </v-card>
           </v-col>
 
-          <v-col cols="12" lg="3" sm="6">
-            <v-card>
+          <v-col>
+            <v-card variant="outlined">
               <v-card-title class="d-flex align-center justify-space-between ga-2">
                 <span>技能路径</span>
                 <v-btn :disabled="busy" variant="tonal" @click="clearSkill">清除</v-btn>
@@ -678,8 +733,8 @@
             </v-card>
           </v-col>
 
-          <v-col cols="12" lg="3" sm="6">
-            <v-card>
+          <v-col>
+            <v-card variant="outlined">
               <v-card-title class="d-flex align-center justify-space-between ga-2">
                 <span>次数计算器</span>
 
@@ -689,7 +744,7 @@
               </v-card-title>
 
               <v-card-text>
-                <v-row dense>
+                <v-row>
                   <v-col cols="12">
                     <v-text-field
                       density="compact"
@@ -739,7 +794,7 @@
           </v-col>
         </v-row>
 
-        <v-card>
+        <v-card variant="outlined">
           <v-card-title class="d-flex align-center justify-space-between ga-2">
             <span>运行日志</span>
 

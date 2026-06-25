@@ -68,6 +68,7 @@ class BackendConfigService:
             "super_wheelspin_use_all",
             "normal_wheelspin_use_all",
             "remove_car_use_all",
+            "global_loop_infinite",
         }
         string_keys = {"share_code", "restart_cmd", "calc_a", "calc_b", "calc_c", "calc_d", "log_level"}
 

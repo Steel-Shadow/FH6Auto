@@ -28,6 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "next_4": 5,
     "next_5": 1,
     "global_loops": 10,
+    "global_loop_infinite": False,
     "skill_dirs": ["right", "up", "up", "up", "left"],
     "share_code": "659086805",
     "auto_restart": True,
