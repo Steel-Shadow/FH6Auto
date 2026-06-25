@@ -5,6 +5,7 @@ import time
 from typing import TYPE_CHECKING
 
 from ..input import DIK_CODES
+from ..vision.matcher import CarCardPageSelector, CarCardSearchOptions
 
 if TYPE_CHECKING:
     from ..backend.app import BackendApp
@@ -14,18 +15,10 @@ class RaceFlow:
     RACE_TIMEOUT_SECONDS = 150.0
     RACE_CAR_TEMPLATE = "skillcar.png"
     RACE_CAR_FAVORITE_TAG = "liketag.png"
-    RACE_CAR_MATCH_PARAMS = {
-        "fast_mode": True,
-        "final_threshold": 0.78,
-        "title_threshold": 0.72,
-        "pi_threshold": 0.82,
-        "rarity_threshold": 0.68,
-        "body_threshold": 0.55,
-        "tag_threshold": 0.55,
-    }
 
     def __init__(self, app: BackendApp) -> None:
         self.app = app
+        self.car_cards = CarCardPageSelector(app)
 
     def _skill_points_per_race(self) -> int:
         raw_points = self.app.services.config.values.get("calc_d", "50")
@@ -45,21 +38,6 @@ class RaceFlow:
             region=self.app.services.game_window.regions["下"],
             timeout=timeout,
             interval=1.0,
-        )
-
-    def _wait_for_race_car(self, timeout: float = 2.0):
-        return self.app.services.image_waits.wait_for_car_card(
-            self.RACE_CAR_TEMPLATE,
-            required_tag_path=self.RACE_CAR_FAVORITE_TAG,
-            timeout=timeout,
-            interval=0.25,
-            fast_mode=self.RACE_CAR_MATCH_PARAMS["fast_mode"],
-            final_threshold=self.RACE_CAR_MATCH_PARAMS["final_threshold"],
-            title_threshold=self.RACE_CAR_MATCH_PARAMS["title_threshold"],
-            pi_threshold=self.RACE_CAR_MATCH_PARAMS["pi_threshold"],
-            rarity_threshold=self.RACE_CAR_MATCH_PARAMS["rarity_threshold"],
-            body_threshold=self.RACE_CAR_MATCH_PARAMS["body_threshold"],
-            tag_threshold=self.RACE_CAR_MATCH_PARAMS["tag_threshold"],
         )
 
     def _find_like_author_prompt(self):
@@ -221,11 +199,20 @@ class RaceFlow:
         self.app.services.input_actions.hw_press("enter")
         sleep(2.0)
         self.app.services.input_actions.hw_press("enter")
-        sleep(2.0)
+        sleep(1.0)
 
-        pos_target = self._wait_for_race_car(timeout=2)
+        race_car_options = CarCardSearchOptions(
+            card_path=self.RACE_CAR_TEMPLATE,
+            label="目标跑图车辆",
+            required_tag_path=self.RACE_CAR_FAVORITE_TAG,
+            tag_threshold=0.55,
+            max_pages=1,
+            page_timeout=2.0,
+            interval=0.25,
+        )
+        race_car_result = self.car_cards.find(race_car_options)
 
-        if not pos_target:
+        if not race_car_result:
             self.app.log("未找到目标跑图车辆，重新选择制造商...", level="debug")
             self.app.services.input_actions.hw_press("backspace")
             sleep(1.2)
@@ -241,22 +228,24 @@ class RaceFlow:
 
             self.app.services.input_actions.game_click(pos_brand)
             sleep(1.2)
+            race_car_result = self.car_cards.find(
+                CarCardSearchOptions(
+                    card_path=self.RACE_CAR_TEMPLATE,
+                    label="目标跑图车辆",
+                    required_tag_path=self.RACE_CAR_FAVORITE_TAG,
+                    tag_threshold=0.55,
+                    max_pages=20,
+                    page_timeout=2.0,
+                    interval=0.25,
+                    turn_key_delay=0.08,
+                )
+            )
 
-            for _ in range(20):
-                pos_target = self._wait_for_race_car(timeout=2)
-                if pos_target:
-                    break
-
-                for _ in range(4):
-                    self.app.services.input_actions.hw_press("right", delay=0.08)
-                    sleep(0.08)
-                sleep(0.4)
-
-        if not pos_target:
+        if not race_car_result:
             self.app.log("翻页未能找到目标跑图车辆。", level="warning")
             return False
 
-        self.app.services.input_actions.game_click(pos_target)
+        self.app.services.input_actions.game_click(race_car_result.position)
         sleep(0.5)
         self.app.services.input_actions.hw_press("enter")
         sleep(4.0)

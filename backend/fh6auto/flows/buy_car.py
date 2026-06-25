@@ -136,15 +136,8 @@ class BuyCarFlow:
         self.app.services.input_actions.hw_press("down")
         sleep(0.4)
 
-        pos_22b = self.app.services.image_waits.wait_for_car_card(
+        pos_22b = self.app.services.image_matcher.find_car_card(
             "consumablecar.png",
-            final_threshold=0.80,
-            title_threshold=0.74,
-            pi_threshold=0.84,
-            rarity_threshold=0.70,
-            body_threshold=0.58,
-            timeout=8,
-            interval=0.3,
         )
         if not pos_22b:
             self.app.log("未找到消耗品车辆", level="warning")
@@ -159,13 +152,10 @@ class BuyCarFlow:
             self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("down")
             sleep(0.2)
-            self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("enter")
             sleep(0.6)
-            self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("enter")
             sleep(0.6)
-            self.app.services.input_actions.move_to_game_coord(5, 5)
             self.app.services.input_actions.hw_press("enter")
             sleep(0.7)
 

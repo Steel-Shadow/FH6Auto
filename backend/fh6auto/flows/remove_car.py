@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
+from ..vision.matcher import CarCardPageSelector, CarCardSearchOptions
+
 if TYPE_CHECKING:
     from ..backend.app import BackendApp
 
@@ -8,6 +10,7 @@ if TYPE_CHECKING:
 class RemoveCarFlow:
     def __init__(self, app: BackendApp) -> None:
         self.app = app
+        self.car_cards = CarCardPageSelector(app)
 
     # ==========================================
     # --- 模块：移除车辆 ---
@@ -77,7 +80,7 @@ class RemoveCarFlow:
         self.app.services.input_actions.hw_press("down")
         sleep(0.1)
         self.app.services.input_actions.hw_press("enter")
-        sleep(0.1)
+        sleep(0.5)
         self.app.services.input_actions.hw_press("esc")
         sleep(0.5)
 
@@ -96,78 +99,47 @@ class RemoveCarFlow:
 
         self.app.log("开始删除车辆", level="debug")
 
-        not_found_pages = 0
         while use_all or self.app.state.sc_count < target_count:
-            self.app.log(f"正在使用 3模式 严格扫描当前页面... (连续未找到: {not_found_pages}/5)", level="debug")
-
-            pos_target = self.app.services.image_waits.wait_for_car_card(
-                "removecarobject.png",
-                excluded_tag_text="全新",
-                exclude_driving=True,
-                final_threshold=0.80,
-                title_threshold=0.74,
-                pi_threshold=0.84,
-                rarity_threshold=0.70,
-                exclude_tag_threshold=0.65,
-                timeout=3.0,
-                interval=0.2,
+            car_result = self.car_cards.find(
+                CarCardSearchOptions(
+                    "removecarobject.png",
+                    label="可移除消耗品车辆",
+                    excluded_tag_text="全新",
+                    exclude_driving=True,
+                    max_pages=5,
+                    page_timeout=0.5,
+                    interval=0.2,
+                )
             )
 
-            if not pos_target:
-                not_found_pages += 1
-                if not_found_pages >= 5:
-                    self.app.log("连续翻找 5 页仍未搜索到目标车辆，视为车辆已全部清理完毕。", level="debug")
-                    break  # 直接跳出循环，结束当前任务
-
-                self.app.log(f"当前页面未找到，向右翻页寻找... (第 {not_found_pages} 次翻页)", level="debug")
-                for _ in range(4):
-                    self.app.services.input_actions.hw_press("right", delay=0.06)
-                    sleep(0.1)
-                sleep(0.4)
-                continue
-            # ====== 找到了目标车辆，重置翻页计数器 ======
-            not_found_pages = 0
+            if not car_result:
+                self.app.log("连续翻找 5 页仍未搜索到目标车辆，视为车辆已全部清理完毕。", level="debug")
+                break
 
             self.app.log("精准锁定目标车辆，执行点击...", level="debug")
-            self.app.services.input_actions.game_click(pos_target)
-            sleep(1.5)  # 等待点击后的反应
+            self.app.services.input_actions.game_click(car_result.position)
+            self.app.services.input_actions.move_to_game_coord(5, 5)
+            sleep(0.5)  # 等待点击后的反应
 
             # 若该车在点击前已经被选中，则会直接弹出“选择操作”菜单，否则会将列表车辆列表先滑动到指定位置
             pos_cancel = self.app.services.ocr.find_footer_text_ui("取消")
             if not pos_cancel:
                 self.app.services.input_actions.hw_press("enter")
+                sleep(0.5)
 
-            window_x, window_y, window_w, window_h = self.app.services.game_window.regions["全界面"]
-            operation_menu_region = (
-                window_x + int(window_w * 0.30),
-                window_y + int(window_h * 0.34),
-                int(window_w * 0.40),
-                int(window_h * 0.36),
-            )
-            self.app.log("寻找 '从车库移除车辆' 按钮...", level="debug")
-            pos_remove = self.app.services.image_waits.wait_for_any_text_ui(
-                ["从车库移除车辆"],
-                region=operation_menu_region,
-                timeout=5.0,
-                interval=0.3,
-            )
-
-            if pos_remove:
-                self.app.log("找到移除按钮，点击...", level="debug")
-                self.app.services.input_actions.game_click(pos_remove)
-                self.app.services.input_actions.move_to_game_coord(5, 5)
-            else:
-                self.app.log("找不到移除按钮", level="warning")
-                return False
+            for i in range(4):
+                self.app.services.input_actions.hw_press("down")
+                sleep(0.1)
+            self.app.services.input_actions.hw_press("enter")
 
             sleep(0.8)  # 等待“你确定要移除吗”的确认弹窗
 
             # 确认移除操作 (按向下选"嗯"，然后回车)
             self.app.log("确认移除...", level="debug")
             self.app.services.input_actions.hw_press("down")
-            sleep(0.3)
+            sleep(0.1)
             self.app.services.input_actions.hw_press("enter")
-            sleep(1.2)
+            sleep(1.0)
 
             self.app.state.sc_count += 1
             progress_total = self.app.state.sc_count if use_all else target_count

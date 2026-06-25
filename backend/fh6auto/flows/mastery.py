@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
+from ..vision.matcher import CarCardPageSelector, CarCardSearchOptions
+
 if TYPE_CHECKING:
     from ..backend.app import BackendApp
 
@@ -10,6 +12,7 @@ class MasteryFlow:
 
     def __init__(self, app: BackendApp) -> None:
         self.app = app
+        self.car_cards = CarCardPageSelector(app)
 
     def _skill_points_per_car(self) -> int:
         raw_points = self.app.services.config.values.get("calc_c", "30")
@@ -136,25 +139,10 @@ class MasteryFlow:
             sleep(1.0)
             start_page = max(0, int(self.app.state.memory_car_page or 0))
 
-            if start_page > 0:
-                self.app.log(f"智能记忆触发：从第 {start_page} 页开始扫描...", level="debug")
-                for _ in range(start_page):
-                    for _ in range(4):
-                        self.app.services.input_actions.hw_press("right", delay=0.06)
-                        sleep(0.1)
-                    sleep(0.15)  # 给一点点动画缓冲时间
-            pos_target = None
-            found_car = False
-            current_page = start_page
-            not_found_pages = 0
-
-            while not_found_pages < self.NOT_FOUND_PAGE_LIMIT:
-                self.app.log(
-                    f"扫描全新消耗品车辆... (连续未找到: {not_found_pages}/{self.NOT_FOUND_PAGE_LIMIT})",
-                    level="debug",
-                )
-                pos_target = self.app.services.image_waits.wait_for_car_card(
+            car_result = self.car_cards.find(
+                CarCardSearchOptions(
                     "newCC.png",
+                    label="全新消耗品车辆",
                     required_tag_text="全新",
                     final_threshold=0.78,
                     title_threshold=0.72,
@@ -162,29 +150,15 @@ class MasteryFlow:
                     rarity_threshold=0.68,
                     body_threshold=0.55,
                     tag_threshold=0.70,
-                    timeout=1.5,
+                    max_pages=self.NOT_FOUND_PAGE_LIMIT,
+                    start_page=start_page,
+                    page_timeout=1.5,
                     interval=0.2,
                     fast_mode=True,
                 )
+            )
 
-                if pos_target:
-                    self.app.services.input_actions.game_click(pos_target)
-                    found_car = True
-                    self.app.state.memory_car_page = current_page
-                    self.app.log(f"锁定目标车辆！已记录当前页码: {current_page}", level="debug")
-                    break
-
-                not_found_pages += 1
-                if not_found_pages >= self.NOT_FOUND_PAGE_LIMIT:
-                    break
-
-                self.app.log(f"当前页面未找到全新车辆，向右翻页寻找... (第 {not_found_pages} 次翻页)", level="debug")
-                for _ in range(4):
-                    self.app.services.input_actions.hw_press("right", delay=0.06)
-                    sleep(0.1)
-                sleep(0.4)
-                current_page += 1
-            if not found_car:
+            if not car_result:
                 self.app.log(
                     f"从记忆页码 {start_page} 开始连续翻找 {self.NOT_FOUND_PAGE_LIMIT} 页仍未找到全新消耗品车辆，视为车辆已全部处理完毕。",
                     level="debug",
@@ -194,6 +168,10 @@ class MasteryFlow:
                     self.app.services.input_actions.hw_press("esc")
                     sleep(0.8)
                 return finish("未找到全新消耗品车辆")
+
+            self.app.services.input_actions.game_click(car_result.position)
+            self.app.state.memory_car_page = car_result.page_index
+            self.app.log(f"锁定目标车辆！已记录当前页码: {car_result.page_index}", level="debug")
             sleep(0.5)
             self.app.log("确认上车并驾驶当前车辆...", level="debug")
             self.app.services.input_actions.hw_press("enter")

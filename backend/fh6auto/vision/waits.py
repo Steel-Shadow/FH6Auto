@@ -39,56 +39,6 @@ class ImageWaitsService:
             self._sleep_while_running(interval, deadline=deadline)
         return None
 
-    def wait_for_car_card(
-        self,
-        card_path,
-        required_tag_path=None,
-        excluded_tag_path=None,
-        required_tag_text=None,
-        excluded_tag_text=None,
-        exclude_driving=False,
-        region=None,
-        timeout: float = 30,
-        interval: float = 0.4,
-        fast_mode=True,
-        candidate_threshold=0.50,
-        final_threshold=0.78,
-        title_threshold=0.72,
-        pi_threshold=0.82,
-        rarity_threshold=0.68,
-        body_threshold=0.55,
-        tag_threshold=0.70,
-        exclude_tag_threshold=0.65,
-        max_candidates=80,
-        mask_areas=None,
-        template_fallback=False,
-    ):
-        return self._wait_for(
-            lambda: self.app.services.image_matcher.find_car_card(
-                card_path,
-                required_tag_path=required_tag_path,
-                excluded_tag_path=excluded_tag_path,
-                required_tag_text=required_tag_text,
-                excluded_tag_text=excluded_tag_text,
-                exclude_driving=exclude_driving,
-                region=region,
-                fast_mode=fast_mode,
-                candidate_threshold=candidate_threshold,
-                final_threshold=final_threshold,
-                title_threshold=title_threshold,
-                pi_threshold=pi_threshold,
-                rarity_threshold=rarity_threshold,
-                body_threshold=body_threshold,
-                tag_threshold=tag_threshold,
-                exclude_tag_threshold=exclude_tag_threshold,
-                max_candidates=max_candidates,
-                mask_areas=mask_areas,
-                template_fallback=template_fallback,
-            ),
-            timeout=timeout,
-            interval=interval,
-        )
-
     def wait_for_image_sift(
         self,
         reference_path,
