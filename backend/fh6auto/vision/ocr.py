@@ -1012,8 +1012,7 @@ class OcrService:
                 region = full_region
 
         sx, sy, sw, sh = map(int, region)
-        preferred_footer_h = max(1, int(sh * 0.20))
-        bottom_h = min(preferred_footer_h, 420)
+        bottom_h = max(1, int(sh * 0.20))
         bottom_y = sy + sh - bottom_h
         return [("底部提示栏", (sx, bottom_y, sw, bottom_h))]
 

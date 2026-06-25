@@ -31,16 +31,16 @@ const modules = [
     countKey: 'race_count',
     useAllKey: 'race_until_skill_cap',
     useAllLabel: '达到技术点上限',
-    color: 'blue',
+    color: '#4da3ff',
   },
-  { key: 'buy', title: '2. 批量买车', countKey: 'buy_count', color: 'green' },
+  { key: 'buy', title: '2. 批量买车', countKey: 'buy_count', color: '#46c784' },
   {
     key: 'mastery',
     title: '3. 熟练度加点',
     countKey: 'mastery_count',
     useAllKey: 'mastery_use_all',
     useAllLabel: '用完技术点',
-    color: 'violet',
+    color: '#b487ff',
   },
   {
     key: 'auto_wheelspin',
@@ -48,7 +48,7 @@ const modules = [
     countKey: 'wheelspin_count',
     useAllKey: 'wheelspin_use_all',
     useAllLabel: '用完所有抽奖次数',
-    color: 'cyan',
+    color: '#4fc3d7',
   },
   {
     key: 'sell',
@@ -56,7 +56,7 @@ const modules = [
     countKey: 'sc_count',
     useAllKey: 'remove_car_use_all',
     useAllLabel: '移除全部',
-    color: 'amber',
+    color: '#f2b84b',
   },
 ]
 
@@ -68,6 +68,9 @@ const nextSteps = [
   { value: 5, label: '移除车辆' },
 ]
 
+const nextStepOptions = [{ value: 0, label: '停止' }, ...nextSteps]
+const logLevelItems = ['info', 'debug', 'warning', 'error']
+
 const skillButtons = [
   { value: 'up', label: '↑' },
   { value: 'down', label: '↓' },
@@ -76,20 +79,20 @@ const skillButtons = [
 ]
 
 const wheelspinOptions = [
-  {
-    label: '超级抽奖',
-    countKey: 'wheelspin_count',
-  },
-  {
-    label: '普通抽奖',
-    countKey: 'normal_wheelspin_count',
-  },
+  { label: '超级抽奖', countKey: 'wheelspin_count' },
+  { label: '普通抽奖', countKey: 'normal_wheelspin_count' },
 ]
 
 const statusLabel = computed(() => {
   if (state.runtime.is_paused) return '已暂停'
   if (state.runtime.is_running) return '运行中'
   return '空闲'
+})
+
+const statusColor = computed(() => {
+  if (state.runtime.is_paused) return 'warning'
+  if (state.runtime.is_running) return 'success'
+  return 'secondary'
 })
 
 const elapsedText = computed(() => {
@@ -104,12 +107,6 @@ const progressText = computed(() => {
   const progress = state.runtime.progress || { current: 0, total: 0 }
   return `${progress.current || 0} / ${progress.total || 0}`
 })
-
-async function scrollLogToLatest() {
-  await nextTick()
-  if (!lockLatestLog.value || !logBox.value) return
-  logBox.value.scrollTop = logBox.value.scrollHeight
-}
 
 const skillCells = computed(() => {
   const cells = Array.from({ length: 16 }, () => false)
@@ -127,9 +124,43 @@ const skillCells = computed(() => {
   return cells
 })
 
+function markDirty() {
+  dirty.value = true
+}
+
+function setDraftValue(key, value) {
+  draft[key] = value
+  markDirty()
+}
+
+function setDraftNumber(key, value) {
+  const number = Number(value)
+  draft[key] = Number.isFinite(number) ? number : 0
+  markDirty()
+}
+
+function nextStepSelectValue(index) {
+  const step = index + 1
+  return draft[`chk_${step}`] ? Number(draft[`next_${step}`] || step) : 0
+}
+
+function updateNextStep(index, value) {
+  const step = index + 1
+  const nextValue = Number(value)
+  draft[`chk_${step}`] = nextValue !== 0
+  if (nextValue !== 0) draft[`next_${step}`] = nextValue
+  markDirty()
+}
+
 function copyConfig(config) {
   Object.keys(draft).forEach((key) => delete draft[key])
   Object.assign(draft, JSON.parse(JSON.stringify(config || {})))
+}
+
+async function scrollLogToLatest() {
+  await nextTick()
+  if (!lockLatestLog.value || !logBox.value) return
+  logBox.value.scrollTop = logBox.value.scrollHeight
 }
 
 async function request(path, options = {}) {
@@ -279,217 +310,336 @@ watch(
 </script>
 
 <template>
-  <main class="app-shell">
-    <header class="topbar">
-      <div>
-        <h1>FH6Auto</h1>
-        <p>v{{ state.version || '-' }}</p>
-      </div>
-      <div class="status-cluster">
-        <span class="status-pill" :class="state.runtime.status">{{ statusLabel }}</span>
-        <button type="button" class="ghost" :disabled="busy" @click="togglePause">
-          <span>{{ state.runtime.is_paused ? '继续' : '暂停' }}</span>
-          <kbd>F1</kbd>
-        </button>
-        <button type="button" class="danger" :disabled="busy" @click="stopAll">
-          <span>停止</span>
-          <kbd>F2</kbd>
-        </button>
-      </div>
-    </header>
+  <v-app>
+    <v-main>
+      <v-container fluid class="app-shell">
+        <v-row align="center" justify="space-between" class="mb-3" dense>
+          <v-col cols="12" md="5">
+            <div class="app-title">FH6Auto</div>
+            <div class="text-medium-emphasis">v{{ state.version || '-' }}</div>
+          </v-col>
+          <v-col cols="12" md="7" class="d-flex justify-md-end align-center flex-wrap ga-2">
+            <v-chip :color="statusColor" variant="tonal" size="large">{{ statusLabel }}</v-chip>
+            <v-btn variant="tonal" :disabled="busy" @click="togglePause">
+              {{ state.runtime.is_paused ? '继续' : '暂停' }}
+              <kbd class="shortcut">F1</kbd>
+            </v-btn>
+            <v-btn color="error" variant="tonal" :disabled="busy" @click="stopAll">
+              停止
+              <kbd class="shortcut">F2</kbd>
+            </v-btn>
+          </v-col>
+        </v-row>
 
-    <section class="runtime-band">
-      <div>
-        <span>当前任务</span>
-        <strong>{{ state.runtime.current_task }}</strong>
-      </div>
-      <div>
-        <span>任务进度</span>
-        <strong>{{ progressText }}</strong>
-      </div>
-      <div>
-        <span>大循环</span>
-        <strong>{{ state.runtime.loop.current || 0 }} / {{ state.runtime.loop.total || 0 }}</strong>
-      </div>
-      <div>
-        <span>总耗时</span>
-        <strong>{{ elapsedText }}</strong>
-      </div>
-    </section>
+        <v-row dense class="mb-3">
+          <v-col cols="12" sm="6" lg="3">
+            <v-card>
+              <v-card-text>
+                <div class="text-caption text-medium-emphasis">当前任务</div>
+                <div class="runtime-value">{{ state.runtime.current_task }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" sm="6" lg="3">
+            <v-card>
+              <v-card-text>
+                <div class="text-caption text-medium-emphasis">任务进度</div>
+                <div class="runtime-value">{{ progressText }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" sm="6" lg="3">
+            <v-card>
+              <v-card-text>
+                <div class="text-caption text-medium-emphasis">大循环</div>
+                <div class="runtime-value">{{ state.runtime.loop.current || 0 }} / {{ state.runtime.loop.total || 0 }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" sm="6" lg="3">
+            <v-card>
+              <v-card-text>
+                <div class="text-caption text-medium-emphasis">总耗时</div>
+                <div class="runtime-value">{{ elapsedText }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
 
-    <p v-if="errorMessage" class="error-line">{{ errorMessage }}</p>
+        <v-alert v-if="errorMessage" type="error" variant="tonal" class="mb-3">{{ errorMessage }}</v-alert>
 
-    <section class="module-grid">
-      <article v-for="(module, index) in modules" :key="module.key" class="module-card" :class="module.color">
-        <div class="module-title">
-          <h2>{{ module.title }}</h2>
-          <button type="button" :disabled="busy || state.runtime.is_running" @click="startModule(module.key)">
-            开始
-          </button>
-        </div>
-        <div v-if="module.key === 'auto_wheelspin'" class="wheelspin-config">
-          <label
-            v-for="option in wheelspinOptions"
-            :key="option.countKey"
-            class="count-control"
-            :class="{ disabled: draft[module.useAllKey] }"
-          >
-            <span>{{ option.label }}次数</span>
-            <input
-              v-model.number="draft[option.countKey]"
-              type="number"
-              min="0"
-              :disabled="draft[module.useAllKey]"
-              @input="dirty = true"
-            />
-          </label>
-          <label class="check-line use-all-toggle" :class="{ active: draft[module.useAllKey] }">
-            <input v-model="draft[module.useAllKey]" type="checkbox" @change="dirty = true" />
-            <span>{{ module.useAllLabel }}</span>
-          </label>
-          <label>
-            <span>低价车出售阈值(CR)</span>
-            <input v-model.number="draft.wheelspin_sell_threshold" type="number" min="0" step="1000" @input="dirty = true" />
-          </label>
-        </div>
-        <label v-else class="count-control" :class="{ disabled: module.useAllKey && draft[module.useAllKey] }">
-          <span>执行次数</span>
-          <input
-            v-model.number="draft[module.countKey]"
-            type="number"
-            min="0"
-            :disabled="module.useAllKey && draft[module.useAllKey]"
-            @input="dirty = true"
-          />
-        </label>
-        <label
-          v-if="module.useAllKey"
-          class="check-line use-all-toggle"
-          :class="{ active: draft[module.useAllKey] }"
-        >
-          <input v-model="draft[module.useAllKey]" type="checkbox" @change="dirty = true" />
-          <span>{{ module.useAllLabel }}</span>
-        </label>
-        <label v-if="module.key === 'race'">
-          <span>蓝图代码</span>
-          <input v-model="draft.share_code" inputmode="numeric" @input="dirty = true" />
-        </label>
-        <div class="next-row">
-          <label>
-            <span>下一步骤</span>
-            <select v-model.number="draft[`next_${index + 1}`]" @change="dirty = true">
-              <option v-for="step in nextSteps" :key="step.value" :value="step.value">{{ step.label }}</option>
-            </select>
-          </label>
-          <label class="check-line">
-            <input v-model="draft[`chk_${index + 1}`]" type="checkbox" @change="dirty = true" />
-            <span>继续</span>
-          </label>
-        </div>
-      </article>
-    </section>
+        <v-row dense class="mb-3">
+          <v-col v-for="(module, index) in modules" :key="module.key" cols="12" md="6" xl="4">
+            <v-card class="module-card" :style="{ borderTopColor: module.color }">
+              <v-card-title class="d-flex align-center justify-space-between ga-2">
+                <span>{{ module.title }}</span>
+                <v-btn color="primary" variant="tonal" :disabled="busy || state.runtime.is_running" @click="startModule(module.key)">
+                  开始
+                </v-btn>
+              </v-card-title>
 
-    <section class="settings-layout">
-      <div class="settings-panel">
-        <div class="section-title">
-          <h2>运行设置</h2>
-          <button type="button" :disabled="busy || !dirty" @click="saveConfig">保存配置</button>
-        </div>
-        <div class="form-grid">
-          <label>
-            <span>大循环次数</span>
-            <input v-model.number="draft.global_loops" type="number" min="1" @input="dirty = true" />
-          </label>
-          <label>
-            <span>制造商扫描步数</span>
-            <input v-model.number="draft.manufacturer_scan_steps" type="number" min="5" max="50" @input="dirty = true" />
-          </label>
-          <label>
-            <span>日志级别</span>
-            <select v-model="draft.log_level" @change="dirty = true">
-              <option value="info">info</option>
-              <option value="debug">debug</option>
-              <option value="warning">warning</option>
-              <option value="error">error</option>
-            </select>
-          </label>
-          <label class="wide">
-            <span>启动命令</span>
-            <input v-model="draft.restart_cmd" @input="dirty = true" />
-          </label>
-          <label class="check-line wide">
-            <input v-model="draft.auto_restart" type="checkbox" @change="dirty = true" />
-            <span>游戏闪退后自动重启</span>
-          </label>
-        </div>
-      </div>
+              <v-card-text>
+                <template v-if="module.key === 'auto_wheelspin'">
+                  <v-row dense align="center">
+                    <v-col v-for="option in wheelspinOptions" :key="option.countKey" cols="12" sm="4">
+                      <v-text-field
+                        :model-value="draft[option.countKey]"
+                        :label="`${option.label}次数`"
+                        type="number"
+                        min="0"
+                        density="compact"
+                        hide-details
+                        :disabled="draft[module.useAllKey]"
+                        @update:model-value="setDraftNumber(option.countKey, $event)"
+                      />
+                    </v-col>
+                    <v-col cols="12" sm="4">
+                      <v-checkbox
+                        v-model="draft[module.useAllKey]"
+                        :label="module.useAllLabel"
+                        color="success"
+                        density="compact"
+                        hide-details
+                        @update:model-value="markDirty"
+                      />
+                    </v-col>
+                  </v-row>
+                  <v-text-field
+                    class="mt-3"
+                    :model-value="draft.wheelspin_sell_threshold"
+                    label="低价车出售阈值(CR)"
+                    type="number"
+                    min="0"
+                    step="1000"
+                    density="compact"
+                    hide-details
+                    @update:model-value="setDraftNumber('wheelspin_sell_threshold', $event)"
+                  />
+                </template>
 
-      <div class="settings-panel">
-        <div class="section-title">
-          <h2>技能路径</h2>
-          <button type="button" class="ghost" :disabled="busy" @click="clearSkill">清除</button>
-        </div>
-        <div class="skill-grid" aria-label="技能树">
-          <span v-for="(active, index) in skillCells" :key="index" :class="{ active }"></span>
-        </div>
-        <div class="skill-buttons">
-          <button
-            v-for="button in skillButtons"
-            :key="button.value"
-            type="button"
-            :disabled="busy"
-            @click="addSkill(button.value)"
-          >
-            {{ button.label }}
-          </button>
-        </div>
-        <p class="path-text">{{ (draft.skill_dirs || []).join(' / ') || '未设置' }}</p>
-      </div>
+                <template v-else>
+                  <v-row dense align="center">
+                    <v-col :cols="module.useAllKey ? 7 : 12">
+                      <v-text-field
+                        :model-value="draft[module.countKey]"
+                        label="执行次数"
+                        type="number"
+                        min="0"
+                        density="compact"
+                        hide-details
+                        :disabled="module.useAllKey && draft[module.useAllKey]"
+                        @update:model-value="setDraftNumber(module.countKey, $event)"
+                      />
+                    </v-col>
+                    <v-col v-if="module.useAllKey" cols="5">
+                      <v-checkbox
+                        v-model="draft[module.useAllKey]"
+                        :label="module.useAllLabel"
+                        color="success"
+                        density="compact"
+                        hide-details
+                        @update:model-value="markDirty"
+                      />
+                    </v-col>
+                  </v-row>
+                </template>
 
-      <div class="settings-panel">
-        <div class="section-title">
-          <h2>次数计算器</h2>
-          <button type="button" :disabled="busy || !draft.calc_a" @click="calculateAndApply">计算并应用</button>
-        </div>
-        <div class="form-grid single">
-          <label>
-            <span>CR</span>
-            <input v-model="draft.calc_a" inputmode="numeric" @input="dirty = true" />
-          </label>
-          <label>
-            <span>单车成本</span>
-            <input v-model="draft.calc_b" inputmode="numeric" @input="dirty = true" />
-          </label>
-          <label>
-            <span>单车技能点</span>
-            <input v-model="draft.calc_c" inputmode="numeric" @input="dirty = true" />
-          </label>
-          <label>
-            <span>单次跑图技能点</span>
-            <input v-model="draft.calc_d" inputmode="numeric" @input="dirty = true" />
-          </label>
-        </div>
-      </div>
-    </section>
+                <v-text-field
+                  v-if="module.key === 'race'"
+                  class="mt-3"
+                  :model-value="draft.share_code"
+                  label="蓝图代码"
+                  inputmode="numeric"
+                  density="compact"
+                  hide-details
+                  @update:model-value="setDraftValue('share_code', $event)"
+                />
 
-    <section class="log-panel">
-      <div class="section-title">
-        <h2>运行日志</h2>
-        <div class="log-actions">
-          <label class="check-line compact">
-            <input v-model="lockLatestLog" type="checkbox" @change="scrollLogToLatest" />
-            <span>锁定最新</span>
-          </label>
-          <span>{{ state.runtime.logs.length }} 条</span>
-        </div>
-      </div>
-      <div ref="logBox" class="log-box">
-        <p v-for="item in state.runtime.logs" :key="item.id">
-          <time>{{ item.time }}</time>
-          <span>{{ item.message }}</span>
-        </p>
-      </div>
-    </section>
-  </main>
+                <v-select
+                  class="mt-3"
+                  :model-value="nextStepSelectValue(index)"
+                  label="下一步骤"
+                  :items="nextStepOptions"
+                  item-title="label"
+                  item-value="value"
+                  density="compact"
+                  hide-details
+                  @update:model-value="updateNextStep(index, $event)"
+                />
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <v-row dense class="mb-3">
+          <v-col cols="12" lg="6">
+            <v-card>
+              <v-card-title class="d-flex align-center justify-space-between ga-2">
+                <span>运行设置</span>
+                <v-btn color="primary" variant="tonal" :disabled="busy || !dirty" @click="saveConfig">保存配置</v-btn>
+              </v-card-title>
+              <v-card-text>
+                <v-row dense>
+                  <v-col cols="12" sm="4">
+                    <v-text-field
+                      :model-value="draft.global_loops"
+                      label="大循环次数"
+                      type="number"
+                      min="1"
+                      density="compact"
+                      hide-details
+                      @update:model-value="setDraftNumber('global_loops', $event)"
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="4">
+                    <v-text-field
+                      :model-value="draft.manufacturer_scan_steps"
+                      label="制造商扫描步数"
+                      type="number"
+                      min="5"
+                      max="50"
+                      density="compact"
+                      hide-details
+                      @update:model-value="setDraftNumber('manufacturer_scan_steps', $event)"
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="4">
+                    <v-select
+                      v-model="draft.log_level"
+                      label="日志级别"
+                      :items="logLevelItems"
+                      density="compact"
+                      hide-details
+                      @update:model-value="markDirty"
+                    />
+                  </v-col>
+                  <v-col cols="12">
+                    <v-text-field
+                      :model-value="draft.restart_cmd"
+                      label="启动命令"
+                      density="compact"
+                      hide-details
+                      @update:model-value="setDraftValue('restart_cmd', $event)"
+                    />
+                  </v-col>
+                  <v-col cols="12">
+                    <v-checkbox
+                      v-model="draft.auto_restart"
+                      label="游戏闪退后自动重启"
+                      color="success"
+                      density="compact"
+                      hide-details
+                      @update:model-value="markDirty"
+                    />
+                  </v-col>
+                </v-row>
+              </v-card-text>
+            </v-card>
+          </v-col>
+
+          <v-col cols="12" sm="6" lg="3">
+            <v-card>
+              <v-card-title class="d-flex align-center justify-space-between ga-2">
+                <span>技能路径</span>
+                <v-btn variant="tonal" :disabled="busy" @click="clearSkill">清除</v-btn>
+              </v-card-title>
+              <v-card-text class="text-center">
+                <div class="skill-grid" aria-label="技能树">
+                  <span v-for="(active, index) in skillCells" :key="index" :class="{ active }"></span>
+                </div>
+                <div class="d-flex justify-center ga-2 flex-wrap">
+                  <v-btn v-for="button in skillButtons" :key="button.value" variant="tonal" :disabled="busy" @click="addSkill(button.value)">
+                    {{ button.label }}
+                  </v-btn>
+                </div>
+                <div class="text-body-2 text-medium-emphasis mt-3 path-text">
+                  {{ (draft.skill_dirs || []).join(' / ') || '未设置' }}
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+
+          <v-col cols="12" sm="6" lg="3">
+            <v-card>
+              <v-card-title class="d-flex align-center justify-space-between ga-2">
+                <span>次数计算器</span>
+                <v-btn color="primary" variant="tonal" :disabled="busy || !draft.calc_a" @click="calculateAndApply">
+                  计算并应用
+                </v-btn>
+              </v-card-title>
+              <v-card-text>
+                <v-row dense>
+                  <v-col cols="12">
+                    <v-text-field
+                      :model-value="draft.calc_a"
+                      label="CR"
+                      inputmode="numeric"
+                      density="compact"
+                      hide-details
+                      @update:model-value="setDraftValue('calc_a', $event)"
+                    />
+                  </v-col>
+                  <v-col cols="12">
+                    <v-text-field
+                      :model-value="draft.calc_b"
+                      label="单车成本"
+                      inputmode="numeric"
+                      density="compact"
+                      hide-details
+                      @update:model-value="setDraftValue('calc_b', $event)"
+                    />
+                  </v-col>
+                  <v-col cols="12">
+                    <v-text-field
+                      :model-value="draft.calc_c"
+                      label="单车技能点"
+                      inputmode="numeric"
+                      density="compact"
+                      hide-details
+                      @update:model-value="setDraftValue('calc_c', $event)"
+                    />
+                  </v-col>
+                  <v-col cols="12">
+                    <v-text-field
+                      :model-value="draft.calc_d"
+                      label="单次跑图技能点"
+                      inputmode="numeric"
+                      density="compact"
+                      hide-details
+                      @update:model-value="setDraftValue('calc_d', $event)"
+                    />
+                  </v-col>
+                </v-row>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <v-card>
+          <v-card-title class="d-flex align-center justify-space-between ga-2">
+            <span>运行日志</span>
+            <div class="d-flex align-center ga-3">
+              <v-checkbox
+                v-model="lockLatestLog"
+                label="锁定最新"
+                color="success"
+                density="compact"
+                hide-details
+                @update:model-value="scrollLogToLatest"
+              />
+              <span class="text-body-2 text-medium-emphasis">{{ state.runtime.logs.length }} 条</span>
+            </div>
+          </v-card-title>
+          <v-card-text>
+            <div ref="logBox" class="log-box">
+              <p v-for="item in state.runtime.logs" :key="item.id" class="log-line">
+                <time>{{ item.time }}</time>
+                <span>{{ item.message }}</span>
+              </p>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-container>
+    </v-main>
+  </v-app>
 </template>
-
