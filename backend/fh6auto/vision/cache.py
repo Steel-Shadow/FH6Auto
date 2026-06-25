@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import pickle
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import cv2
@@ -21,6 +22,45 @@ from ..paths import (
 
 if TYPE_CHECKING:
     from ..backend.app import BackendApp
+
+Point = tuple[int, int]
+Region = tuple[int, int, int, int]
+Box = tuple[int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureFrame:
+    """截图帧。
+
+    image 内部坐标从 (0, 0) 开始；origin 是该截图左上角的屏幕绝对坐标。
+    识别算法只处理 image 的局部坐标，对外点击点统一通过这里转换成屏幕绝对坐标。
+    """
+
+    image: np.ndarray
+    region: Region | None
+    origin: Point
+
+    @property
+    def width(self) -> int:
+        return int(self.image.shape[1]) if self.image is not None and self.image.ndim >= 2 else 0
+
+    @property
+    def height(self) -> int:
+        return int(self.image.shape[0]) if self.image is not None and self.image.ndim >= 2 else 0
+
+    def to_screen_point(self, point: tuple[float, float]) -> Point:
+        return (
+            int(round(float(point[0]) + self.origin[0])),
+            int(round(float(point[1]) + self.origin[1])),
+        )
+
+    def box_center(self, box: Box) -> Point:
+        x, y, w, h = box
+        return self.to_screen_point((x + w / 2, y + h / 2))
+
+    def to_screen_box(self, box: Box) -> Box:
+        x, y, w, h = box
+        return (int(x + self.origin[0]), int(y + self.origin[1]), int(w), int(h))
 
 
 class ImageCacheService:
@@ -180,8 +220,8 @@ class ImageCacheService:
             return (0, 0)
         return (int(capture_region[0]), int(capture_region[1]))
 
-    def capture_region(self, region=None, mask_areas=None):
-        """截取指定屏幕区域；未指定时默认截取游戏窗口客户区。"""
+    def capture_frame(self, region=None, mask_areas=None) -> CaptureFrame:
+        """截取指定屏幕区域并返回带坐标原点的截图帧。"""
         capture_region = self.resolve_capture_region(region)
         try:
             if capture_region is not None:
@@ -209,7 +249,15 @@ class ImageCacheService:
                 except Exception:
                     pass
 
-        return screen_bgr
+        return CaptureFrame(
+            image=screen_bgr,
+            region=tuple(map(int, capture_region)) if capture_region is not None else None,
+            origin=self.capture_offset(capture_region),
+        )
+
+    def capture_region(self, region=None, mask_areas=None):
+        """截取指定屏幕区域；未指定时默认截取游戏窗口客户区。"""
+        return self.capture_frame(region, mask_areas=mask_areas).image
 
     def get_scales_to_try(self, fast_mode=True):
         full_region = self.app.services.game_window.regions.get("全界面")

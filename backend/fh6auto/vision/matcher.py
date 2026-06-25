@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -57,8 +58,20 @@ class ImageMatcherService:
         self.sift_feature_cache = {}
         self._tag_contour_cache: dict[str, tuple[np.ndarray, tuple[int, int, int, int]] | None] = {}
 
-    def _capture_offset(self, region=None) -> tuple[int, int]:
-        return self.app.services.image_cache.capture_offset(region)
+    @staticmethod
+    def _elapsed_ms(start: float) -> float:
+        return (time.perf_counter() - start) * 1000.0
+
+    def _log_timing(self, name: str, start: float, **details) -> None:
+        parts = [f"total={self._elapsed_ms(start):.1f}ms"]
+        for key, value in details.items():
+            if value is None:
+                continue
+            if isinstance(value, float):
+                parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
+            else:
+                parts.append(f"{key}={value}")
+        self.app.log(f"[VisionTiming] Match.{name} " + " ".join(parts), level="debug")
 
     @staticmethod
     def _crop_ratio(img, x1, y1, x2, y2):
@@ -868,15 +881,28 @@ class ImageMatcherService:
         if not self.app.state.is_running:
             return None
 
+        started = time.perf_counter()
+        capture_ms = None
+        ocr_ms = None
+        sift_ms = None
+        segment_ms = None
+        template_ms = None
+        candidates_count = 0
+        result_text = "miss"
+        method = "-"
         try:
-            screen_bgr = self.app.services.image_cache.capture_region(region, mask_areas=mask_areas)
-            offset_x, offset_y = self._capture_offset(region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(region, mask_areas=mask_areas)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             candidates = []
             template_orig, _ = self.app.services.image_cache.load_template(card_path)
             if template_orig is None:
+                result_text = "template_missing"
                 return None
 
             target_spec = self._read_car_card_spec_from_template(card_path)
+            ocr_started = time.perf_counter()
             ocr_candidates = self._find_car_card_ocr_candidates(
                 card_path,
                 screen_bgr,
@@ -889,12 +915,10 @@ class ImageMatcherService:
                 tag_threshold=min(float(tag_threshold), 0.55),
                 target=target_spec,
             )
+            ocr_ms = self._elapsed_ms(ocr_started)
             if ocr_candidates:
                 best_ocr = ocr_candidates[0]
-                pos = (
-                    int(best_ocr.pos[0] + offset_x),
-                    int(best_ocr.pos[1] + offset_y),
-                )
+                pos = frame.to_screen_point(best_ocr.pos)
                 self.last_positions[card_path] = pos
                 spec = best_ocr.spec
                 self.app.log(
@@ -904,6 +928,9 @@ class ImageMatcherService:
                     f"全新:{'是' if spec.is_new else '否'}",
                     level="debug",
                 )
+                candidates_count = len(ocr_candidates)
+                result_text = "hit"
+                method = "ocr"
                 return pos
             if target_spec is not None:
                 # self.app.log(
@@ -913,9 +940,12 @@ class ImageMatcherService:
                 #     f"PI={target_spec.car_class or '-'} {target_spec.pi or '-'}, "
                 #     f"年份={target_spec.year or '-'}, 全新={'是' if target_spec.is_new else '否'}"
                 # )
+                result_text = "target_spec_miss"
                 return None
 
+            sift_started = time.perf_counter()
             sift_candidate = self._find_car_card_sift_candidate(card_path, screen_bgr, template_orig)
+            sift_ms = self._elapsed_ms(sift_started)
             if sift_candidate is not None and not (
                 exclude_driving and self._has_driving_badge(sift_candidate["roi"])
             ):
@@ -945,10 +975,7 @@ class ImageMatcherService:
                 if not failed:
                     candidates.append(
                         {
-                            "pos": (
-                                int(sift_candidate["pos"][0] + offset_x),
-                                int(sift_candidate["pos"][1] + offset_y),
-                            ),
+                            "pos": frame.to_screen_point(sift_candidate["pos"]),
                             "scores": scores,
                             "sort_key": sift_candidate["sort_key"],
                             "method": "sift",
@@ -956,6 +983,7 @@ class ImageMatcherService:
                     )
 
             if not candidates:
+                segment_started = time.perf_counter()
                 segment_candidates = self._find_car_card_segment_candidates(
                     screen_bgr,
                     template_orig,
@@ -964,6 +992,7 @@ class ImageMatcherService:
                     tag_threshold=tag_threshold,
                     exclude_driving=exclude_driving,
                 )
+                segment_ms = self._elapsed_ms(segment_started)
                 for segment_candidate in segment_candidates:
                     scores = segment_candidate["scores"]
                     failed = []
@@ -990,9 +1019,10 @@ class ImageMatcherService:
                         continue
                     adjusted_candidate = dict(segment_candidate)
                     px, py = adjusted_candidate["pos"]
-                    adjusted_candidate["pos"] = (int(px + offset_x), int(py + offset_y))
+                    adjusted_candidate["pos"] = frame.to_screen_point((px, py))
                     candidates.append(adjusted_candidate)
 
+            template_started = time.perf_counter()
             for scale in (
                 () if candidates or not template_fallback else self.app.services.image_cache.get_scales_to_try(fast_mode=fast_mode)
             ):
@@ -1065,15 +1095,13 @@ class ImageMatcherService:
 
                     candidates.append(
                         {
-                            "pos": (
-                                int(x + w // 2 + offset_x),
-                                int(y + h // 2 + offset_y),
-                            ),
+                            "pos": frame.to_screen_point((x + w // 2, y + h // 2)),
                             "scores": scores,
                             "sort_key": (x, y),
                             "method": "template",
                         }
                     )
+            template_ms = self._elapsed_ms(template_started)
 
             if not candidates:
                 return None
@@ -1089,6 +1117,9 @@ class ImageMatcherService:
             best = candidates[0]
             scores = best["scores"]
             self.last_positions[card_path] = best["pos"]
+            candidates_count = len(candidates)
+            result_text = "hit"
+            method = best.get("method", "template")
             self.app.log(
                 f"[CarCardMatch] 锁定: {card_path} | 方法:{best.get('method', 'template')} | 综合:{scores['final']:.3f} | "
                 f"标题:{scores['title']:.3f} | PI:{scores['pi']:.3f} | 稀有度:{scores['rarity']:.3f} | "
@@ -1099,8 +1130,22 @@ class ImageMatcherService:
             return best["pos"]
 
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_car_card 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_car_card",
+                started,
+                capture_ms=capture_ms,
+                ocr_ms=ocr_ms,
+                sift_ms=sift_ms,
+                segment_ms=segment_ms,
+                template_ms=template_ms,
+                candidates=candidates_count,
+                method=method,
+                result=result_text,
+            )
 
     def _get_sift_reference_features(self, reference_path, max_features=2500):
         actual_path = get_img_path(reference_path)
@@ -1214,15 +1259,28 @@ class ImageMatcherService:
         if not self.app.state.is_running:
             return None
 
+        started = time.perf_counter()
+        capture_ms = None
+        detect_ms = None
+        match_ms = None
+        refs_count = 0
+        matches_count = 0
+        result_text = "miss"
         try:
-            screen_bgr = self.app.services.image_cache.capture_region(region)
-            offset_x, offset_y = self._capture_offset(region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(region)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
             sift = cv2.SIFT_create(nfeatures=int(max_features))
+            detect_started = time.perf_counter()
             screen_keypoints, screen_descriptors = sift.detectAndCompute(screen_gray, None)
+            detect_ms = self._elapsed_ms(detect_started)
 
             matches = []
+            match_started = time.perf_counter()
             for reference_path in image_list:
+                refs_count += 1
                 reference_data = self._get_sift_reference_features(reference_path, max_features=max_features)
                 if reference_data is None:
                     continue
@@ -1238,6 +1296,8 @@ class ImageMatcherService:
                 )
                 if result:
                     matches.append(result)
+            match_ms = self._elapsed_ms(match_started)
+            matches_count = len(matches)
 
             if not matches:
                 return None
@@ -1245,21 +1305,31 @@ class ImageMatcherService:
             best = max(matches, key=lambda item: (item["inliers"], item["good"]))
             center_x, center_y = best["center"]
 
-            pos = (
-                int(round(center_x + offset_x)),
-                int(round(center_y + offset_y)),
-            )
+            pos = frame.to_screen_point((center_x, center_y))
             self.last_positions[best["reference_path"]] = pos
             self.app.log(
                 f"[SIFTMatch] 命中: {best['reference_path']} | 内点: {best['inliers']}/{best['good']} "
                 f"(阈值 {min_inliers}) | 估算缩放: {best['scale']:.3f}",
                 level="debug",
             )
+            result_text = "hit"
             return pos
 
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_any_image_sift 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_any_image_sift",
+                started,
+                capture_ms=capture_ms,
+                detect_ms=detect_ms,
+                match_ms=match_ms,
+                refs=refs_count,
+                matches=matches_count,
+                result=result_text,
+            )
 
     def find_image_sift(
         self,

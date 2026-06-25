@@ -41,6 +41,7 @@ class InputActionsService:
         self.controller.press(key, delay=delay)
 
     def game_click(self, pos, double=False):
+        """点击屏幕绝对坐标；视觉识别服务对外统一返回这类坐标。"""
         self.app.services.runtime.ensure_running()
         if not pos:
             return

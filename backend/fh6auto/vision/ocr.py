@@ -4,6 +4,7 @@ import gc
 import os
 import re
 import threading
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,21 @@ class OcrService:
         self._text_targets_cache: dict[tuple[str, ...], list[tuple[str, str]]] = {}
         self.last_positions: dict[str, Point] = {}
         self._ensure_engine()
+
+    @staticmethod
+    def _elapsed_ms(start: float) -> float:
+        return (time.perf_counter() - start) * 1000.0
+
+    def _log_timing(self, name: str, start: float, **details) -> None:
+        parts = [f"total={self._elapsed_ms(start):.1f}ms"]
+        for key, value in details.items():
+            if value is None:
+                continue
+            if isinstance(value, float):
+                parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
+            else:
+                parts.append(f"{key}={value}")
+        self.app.log(f"[VisionTiming] OCR.{name} " + " ".join(parts), level="debug")
 
     def _add_nvidia_dll_paths(self) -> list[str]:
         try:
@@ -314,6 +330,7 @@ class OcrService:
         return None
 
     def read(self, img: np.ndarray | str | Path, *, use_det=True, use_cls=True, text_score=0.5) -> list[OcrText]:
+        started = time.perf_counter()
         with self._lock:
             engine = self._ensure_engine()
             result = engine(img, use_det=use_det, use_cls=use_cls, text_score=text_score)
@@ -332,6 +349,20 @@ class OcrService:
                 if idx < len(boxes):
                     box = tuple((float(x), float(y)) for x, y in boxes[idx])
                 output.append(OcrText(str(text), score, box))
+            shape = ""
+            if isinstance(img, np.ndarray) and img.ndim >= 2:
+                shape = f"{img.shape[1]}x{img.shape[0]}"
+            elif isinstance(img, str | Path):
+                shape = "path"
+            self._log_timing(
+                "read",
+                started,
+                use_det=use_det,
+                use_cls=use_cls,
+                threshold=float(text_score),
+                items=len(output),
+                image=shape,
+            )
             return output
 
     def recognize_line(self, img: np.ndarray | str | Path, *, min_score=0.5) -> OcrText | None:
@@ -346,14 +377,6 @@ class OcrService:
             return None
 
         return self.recognize_line(cell_bgr, min_score=min_score)
-
-    def _region_offset(self, region) -> Point:
-        return self.app.services.image_cache.capture_offset(region)
-
-    def _box_center(self, box: Box, region=None) -> Point:
-        x, y, w, h = box
-        offset_x, offset_y = self._region_offset(region)
-        return (int(round(x + w / 2 + offset_x)), int(round(y + h / 2 + offset_y)))
 
     @staticmethod
     def _point_bounds(points, *, offset_x=0, offset_y=0) -> Box | None:
@@ -574,17 +597,26 @@ class OcrService:
         """在当前画面中通过 OCR 定位任意目标文字。"""
         if not self.app.state.is_running:
             return None
+        started = time.perf_counter()
+        capture_ms = None
+        boxes_count = 0
+        result_text = "miss"
         try:
             targets = self._build_text_targets(text_list)
             if not targets:
+                result_text = "no_targets"
                 return None
 
-            screen_bgr = self.app.services.image_cache.capture_region(region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(region)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             boxes = self._find_text_line_candidate_boxes(screen_bgr)
             if not boxes:
                 screen_h, screen_w = screen_bgr.shape[:2]
                 if screen_w <= 900 and screen_h <= 420:
                     boxes = [(0, 0, screen_w, screen_h)]
+            boxes_count = len(boxes)
 
             best = None
             for x, y, w, h in boxes:
@@ -600,13 +632,13 @@ class OcrService:
                         result.score,
                         targets,
                         threshold,
-                        pos=self._box_center(box, region),
+                        pos=frame.box_center(box),
                         box=box,
                     )
                     best = self._better_match(best, candidate)
 
             if best is None:
-                offset_x, offset_y = self._region_offset(region)
+                offset_x, offset_y = frame.origin
                 for result in self.read(screen_bgr, text_score=0.35):
                     bounds = self._point_bounds(result.box)
                     if bounds is None:
@@ -631,19 +663,35 @@ class OcrService:
                     f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}",
                     level="debug",
                 )
+                result_text = "hit"
                 return self._remember_text_match(best)
 
             return None
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_any_text_ui 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_any_text_ui",
+                started,
+                capture_ms=capture_ms,
+                boxes=boxes_count,
+                result=result_text,
+            )
 
     def find_sell_price_value(self, region=None, threshold=0.25) -> int | None:
         """识别重复车辆弹窗里的“出售价格：CR x”。"""
         if not self.app.state.is_running:
             return None
+        started = time.perf_counter()
+        capture_ms = None
+        result_text = "miss"
         try:
-            screen_bgr = self.app.services.image_cache.capture_region(region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(region)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             if screen_bgr.size == 0:
                 return None
 
@@ -657,11 +705,20 @@ class OcrService:
             combined_text = "".join(result.text for result in results)
             value = self.parse_credit_value(combined_text)
             if value is not None:
+                result_text = "hit"
                 self.app.log(f"[PriceOCR] 出售价格: CR {value:,} | OCR: {combined_text}", level="debug")
             return value
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_sell_price_value 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_sell_price_value",
+                started,
+                capture_ms=capture_ms,
+                result=result_text,
+            )
 
     def _default_credit_region(self):
         full_region = self.app.services.game_window.regions.get("全界面")
@@ -680,21 +737,36 @@ class OcrService:
         """识别当前界面右上角的玩家 CR 余额。"""
         if not self.app.state.is_running:
             return None
+        started = time.perf_counter()
+        capture_ms = None
+        result_text = "miss"
         try:
             credit_region = region or self._default_credit_region()
-            screen_bgr = self.app.services.image_cache.capture_region(credit_region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(credit_region)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             if screen_bgr.size == 0:
                 return None
 
             results = self.read(screen_bgr, text_score=threshold)
             value = self.parse_current_credit_value(results, threshold=threshold)
             if value is not None:
+                result_text = "hit"
                 combined_text = "".join(result.text for result in results if result.score >= threshold)
                 self.app.log(f"[CreditOCR] 当前 CR: {value:,} | OCR: {combined_text}", level="debug")
             return value
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_current_credit_value 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_current_credit_value",
+                started,
+                capture_ms=capture_ms,
+                result=result_text,
+            )
 
     def _default_skill_points_region(self):
         full_region = self.app.services.game_window.regions.get("全界面")
@@ -713,21 +785,36 @@ class OcrService:
         """识别车辆菜单页中“技术点数可用”的数值。"""
         if not self.app.state.is_running:
             return None
+        started = time.perf_counter()
+        capture_ms = None
+        result_text = "miss"
         try:
             skill_region = region or self._default_skill_points_region()
-            screen_bgr = self.app.services.image_cache.capture_region(skill_region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(skill_region)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             if screen_bgr.size == 0:
                 return None
 
             results = self.read(screen_bgr, text_score=threshold)
             value = self.parse_current_skill_points_value(results, threshold=threshold)
             if value is not None:
+                result_text = "hit"
                 combined_text = "".join(result.text for result in results if result.score >= threshold)
                 self.app.log(f"[SkillPointOCR] 当前技术点: {value} | OCR: {combined_text}", level="debug")
             return value
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_current_skill_points_value 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_current_skill_points_value",
+                started,
+                capture_ms=capture_ms,
+                result=result_text,
+            )
 
     def _find_menu_button_candidate_boxes(self, screen_bgr, max_candidates=16):
         """用按钮背景/选中边框定位左侧菜单行，再交给 OCR 识别文字。"""
@@ -782,15 +869,24 @@ class OcrService:
         """在当前画面的规则菜单行中定位目标文字。"""
         if not self.app.state.is_running:
             return None
+        started = time.perf_counter()
+        capture_ms = None
+        boxes_count = 0
+        result_text = "miss"
         try:
             targets = self._build_text_targets([target_text])
             if not targets:
+                result_text = "no_targets"
                 return None
 
-            screen_bgr = self.app.services.image_cache.capture_region(region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(region)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             boxes = self._find_menu_button_candidate_boxes(screen_bgr)
+            boxes_count = len(boxes)
             best = None
-            region_x, region_y = self._region_offset(region)
+            region_x, region_y = frame.origin
 
             def consider_result(result, box, *, require_ocr_box=False):
                 nonlocal best
@@ -799,7 +895,7 @@ class OcrService:
                 if ocr_box is None and require_ocr_box:
                     return False
 
-                pos = self._bounds_center(ocr_box) if ocr_box else self._box_center(box, region)
+                pos = self._bounds_center(ocr_box) if ocr_box else frame.box_center(box)
                 candidate = self._match_text_candidate(
                     result.text,
                     result.score,
@@ -845,20 +941,29 @@ class OcrService:
                     f"(阈值 {threshold}) | 候选框: x={x}, y={y}, w={w}, h={h}{ocr_box_text}",
                     level="debug",
                 )
+                result_text = "hit"
                 return self._remember_text_match(best)
 
             return None
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_menu_text_ui 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_menu_text_ui",
+                started,
+                capture_ms=capture_ms,
+                boxes=boxes_count,
+                result=result_text,
+            )
 
     def _footer_text_regions(self, region):
         if region is None:
             full_region = self.app.services.game_window.regions.get("全界面")
             if full_region is None:
-                screen_bgr = self.app.services.image_cache.capture_region(None)
-                h, w = screen_bgr.shape[:2]
-                region = (0, 0, w, h)
+                frame = self.app.services.image_cache.capture_frame(None)
+                region = (frame.origin[0], frame.origin[1], frame.width, frame.height)
             else:
                 region = full_region
 
@@ -871,14 +976,24 @@ class OcrService:
         """在当前画面的底部按键提示栏中定位目标文字。"""
         if not self.app.state.is_running:
             return None
+        started = time.perf_counter()
+        capture_ms = 0.0
+        region_count = 0
+        result_text = "miss"
         try:
             targets = self._build_text_targets([target_text])
             if not targets:
+                result_text = "no_targets"
                 return None
 
             for roi_name, roi in self._footer_text_regions(region):
-                rx, ry, rw, rh = roi
-                roi_bgr = self.app.services.image_cache.capture_region(roi)
+                region_count += 1
+                capture_started = time.perf_counter()
+                frame = self.app.services.image_cache.capture_frame(roi)
+                capture_ms += self._elapsed_ms(capture_started)
+                rx, ry = frame.origin
+                rw, rh = frame.width, frame.height
+                roi_bgr = frame.image
                 if roi_bgr.size == 0:
                     continue
 
@@ -921,12 +1036,22 @@ class OcrService:
                         f"(阈值 {threshold}) | 区域:{best.region_name}{box_text}",
                         level="debug",
                     )
+                    result_text = "hit"
                     return self._remember_text_match(best)
 
             return None
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_footer_text_ui 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_footer_text_ui",
+                started,
+                capture_ms=capture_ms,
+                regions=region_count,
+                result=result_text,
+            )
 
     @staticmethod
     def _cluster_axis_positions(values, tolerance):
@@ -992,11 +1117,20 @@ class OcrService:
         """在当前画面的制造商表格中定位目标文字。"""
         if not self.app.state.is_running or not target_text:
             return None
+        started = time.perf_counter()
+        capture_ms = None
+        cells_count = 0
+        result_text = "miss"
         try:
-            screen_bgr = self.app.services.image_cache.capture_region(region)
+            capture_started = time.perf_counter()
+            frame = self.app.services.image_cache.capture_frame(region)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
             target_norm = self.normalize_text(target_text)
+            cells = self._find_manufacturer_cells(screen_bgr)
+            cells_count = len(cells)
 
-            for cell_box in self._find_manufacturer_cells(screen_bgr):
+            for cell_box in cells:
                 x, y, cell_w, cell_h = cell_box
                 cell = screen_bgr[y : y + cell_h, x : x + cell_w]
                 result = self.recognize_cell_text(cell, min_score=0.3)
@@ -1006,16 +1140,26 @@ class OcrService:
                 if self.normalize_text(result.text) != target_norm or result.score < threshold:
                     continue
 
-                pos = self._box_center(cell_box, region)
+                pos = frame.box_center(cell_box)
                 self.last_positions[target_text] = pos
                 self.app.log(
                     f"[ManufacturerOCR] 命中: {result.text} (目标:{target_text}) | 分数:{result.score:.3f} "
                     f"(阈值 {threshold}) | 单元格: x={x}, y={y}, w={cell_w}, h={cell_h}",
                     level="debug",
                 )
+                result_text = "hit"
                 return pos
 
             return None
         except Exception as e:
+            result_text = "error"
             self.app.log(f"find_manufacturer_text 异常: {e}", level="warning")
             return None
+        finally:
+            self._log_timing(
+                "find_manufacturer_text",
+                started,
+                capture_ms=capture_ms,
+                cells=cells_count,
+                result=result_text,
+            )
