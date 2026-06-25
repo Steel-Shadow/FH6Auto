@@ -69,6 +69,18 @@
     skill_dirs: Direction[]
   }
 
+  interface SkillGridCell {
+    col: number
+    index: number
+    isAvailable: boolean
+    isCurrent: boolean
+    isStart: boolean
+    isVisited: boolean
+    label: string
+    pathIndex: number
+    row: number
+  }
+
   const state = reactive<AppState>({
     version: '',
     runtime: {
@@ -135,13 +147,6 @@
   const nextStepOptions = [{ value: 0, label: '停止' }, ...nextSteps]
   const logLevelItems = ['info', 'debug', 'warning', 'error']
 
-  const skillButtons: { value: Direction, label: string }[] = [
-    { value: 'up', label: '↑' },
-    { value: 'down', label: '↓' },
-    { value: 'left', label: '←' },
-    { value: 'right', label: '→' },
-  ]
-
   const wheelspinOptions: { label: string, countKey: string }[] = [
     { label: '超级抽奖', countKey: 'wheelspin_count' },
     { label: '普通抽奖', countKey: 'normal_wheelspin_count' },
@@ -188,21 +193,80 @@
     return String(state.runtime.loop.total || 0)
   })
 
-  const skillCells = computed(() => {
-    const cells = Array.from({ length: 16 }, () => false)
+  const skillPath = computed(() => {
+    const path = [{ row: 3, col: 0 }]
+    const visited = new Set(['3:0'])
     let row = 3
     let col = 0
-    cells[row * 4 + col] = true
+
     for (const direction of draft.skill_dirs || []) {
       if (direction === 'up') row -= 1
       if (direction === 'down') row += 1
       if (direction === 'left') col -= 1
       if (direction === 'right') col += 1
+
       if (row < 0 || row > 3 || col < 0 || col > 3) break
-      cells[row * 4 + col] = true
+
+      const key = `${row}:${col}`
+      if (visited.has(key)) break
+      visited.add(key)
+      path.push({ row, col })
     }
-    return cells
+    return path
   })
+
+  const skillGridCells = computed<SkillGridCell[]>(() => {
+    const pathIndexByCell = new Map(skillPath.value.map((cell, index) => [`${cell.row}:${cell.col}`, index]))
+    const current = skillPath.value.at(-1) || { row: 3, col: 0 }
+
+    return Array.from({ length: 16 }, (_, index) => {
+      const row = Math.floor(index / 4)
+      const col = index % 4
+      const key = `${row}:${col}`
+      const pathIndex = pathIndexByCell.get(key) ?? -1
+      const isVisited = pathIndex >= 0
+      const isCurrent = row === current.row && col === current.col
+      const isStart = row === 3 && col === 0
+      const isAdjacent = Math.abs(row - current.row) + Math.abs(col - current.col) === 1
+      let label = ''
+      if (isStart) {
+        label = '起'
+      } else if (isVisited) {
+        label = String(pathIndex)
+      }
+
+      return {
+        col,
+        index,
+        isAvailable: isAdjacent && !isVisited,
+        isCurrent,
+        isStart,
+        isVisited,
+        label,
+        pathIndex,
+        row,
+      }
+    })
+  })
+
+  const skillPathText = computed(() => {
+    const steps = skillPath.value.length - 1
+    return steps > 0 ? `已选择 ${steps} 步` : '从左下角开始'
+  })
+
+  function skillCellColor (cell: SkillGridCell) {
+    if (cell.isCurrent) return 'primary'
+    if (cell.isVisited) return 'primary'
+    if (cell.isAvailable) return 'secondary'
+    return undefined
+  }
+
+  function skillCellVariant (cell: SkillGridCell) {
+    if (cell.isCurrent) return 'flat'
+    if (cell.isVisited) return 'tonal'
+    if (cell.isAvailable) return 'outlined'
+    return 'outlined'
+  }
 
   function messageFromError (error: unknown, fallback = '操作失败') {
     return error instanceof Error ? error.message : fallback
@@ -364,7 +428,17 @@
     await refresh()
   }
 
-  async function addSkill (direction: Direction) {
+  async function selectSkillCell (cell: SkillGridCell) {
+    if (!cell.isAvailable) return
+
+    const current = skillPath.value.at(-1) || { row: 3, col: 0 }
+    let direction: Direction | null = null
+    if (cell.row === current.row - 1 && cell.col === current.col) direction = 'up'
+    if (cell.row === current.row + 1 && cell.col === current.col) direction = 'down'
+    if (cell.row === current.row && cell.col === current.col - 1) direction = 'left'
+    if (cell.row === current.row && cell.col === current.col + 1) direction = 'right'
+
+    if (!direction) return
     await setSkillDirs([...(draft.skill_dirs || []), direction])
   }
 
@@ -696,24 +770,23 @@
               </v-card-title>
 
               <v-card-text class="text-center">
-                <div aria-label="技能树" class="skill-grid">
-                  <span v-for="(active, index) in skillCells" :key="index" :class="{ active }" />
-                </div>
-
-                <div class="d-flex justify-center ga-2 flex-wrap">
+                <div aria-label="技能树" class="skill-grid mb-3">
                   <v-btn
-                    v-for="button in skillButtons"
-                    :key="button.value"
-                    :disabled="busy"
-                    variant="tonal"
-                    @click="addSkill(button.value)"
+                    v-for="cell in skillGridCells"
+                    :key="cell.index"
+                    class="skill-cell"
+                    :color="skillCellColor(cell)"
+                    :disabled="busy || (!cell.isAvailable && !cell.isVisited)"
+                    :ripple="cell.isAvailable"
+                    :variant="skillCellVariant(cell)"
+                    @click="selectSkillCell(cell)"
                   >
-                    {{ button.label }}
+                    {{ cell.label }}
                   </v-btn>
                 </div>
 
-                <div class="text-body-2 text-medium-emphasis mt-3 path-text">
-                  {{ (draft.skill_dirs || []).join(' / ') || '未设置' }}
+                <div class="text-body-2 text-medium-emphasis path-text">
+                  {{ skillPathText }}
                 </div>
               </v-card-text>
             </v-card>
@@ -811,3 +884,19 @@
     </v-main>
   </v-app>
 </template>
+
+<style scoped>
+  .skill-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(4, 42px);
+    justify-content: center;
+  }
+
+  .skill-cell {
+    height: 42px;
+    min-width: 42px;
+    padding: 0;
+    width: 42px;
+  }
+</style>

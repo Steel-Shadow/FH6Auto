@@ -100,6 +100,7 @@ class BackendConfigService:
 
         valid: list[str] = []
         row, col = 3, 0
+        visited = {(row, col)}
         for item in value:
             direction = str(item)
             if direction == "up":
@@ -115,5 +116,9 @@ class BackendConfigService:
 
             if not (0 <= row < 4 and 0 <= col < 4):
                 break
+            if (row, col) in visited:
+                break
+
+            visited.add((row, col))
             valid.append(direction)
         return valid
