@@ -77,7 +77,13 @@ class BackendConfigService:
                 continue
             if key in int_keys:
                 try:
-                    normalized[key] = max(0, int(value)) if key == "wheelspin_sell_threshold" else int(value)
+                    int_value = int(value)
+                    if key == "wheelspin_sell_threshold":
+                        normalized[key] = max(0, int_value)
+                    elif key == "manufacturer_scan_steps":
+                        normalized[key] = max(5, min(100, int_value))
+                    else:
+                        normalized[key] = int_value
                 except Exception:
                     continue
             elif key in bool_keys:

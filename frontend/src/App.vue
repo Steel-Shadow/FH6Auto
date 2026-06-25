@@ -14,7 +14,6 @@
     global_loop_infinite?: boolean
     global_loops?: number
     log_level?: string
-    manufacturer_scan_steps?: number
     normal_wheelspin_count?: number
     normal_wheelspin_use_all?: boolean
     remove_car_use_all?: boolean
@@ -629,7 +628,7 @@
 
               <v-card-text>
                 <v-row>
-                  <v-col cols="12" sm="3">
+                  <v-col cols="12" sm="4">
                     <v-text-field
                       density="compact"
                       :disabled="draftBoolean('global_loop_infinite')"
@@ -642,7 +641,7 @@
                     />
                   </v-col>
 
-                  <v-col class="d-flex align-center" cols="12" sm="3">
+                  <v-col class="d-flex align-center" cols="12" sm="4">
                     <v-checkbox
                       v-model="draft.global_loop_infinite"
                       color="success"
@@ -653,20 +652,7 @@
                     />
                   </v-col>
 
-                  <v-col cols="12" sm="3">
-                    <v-text-field
-                      density="compact"
-                      hide-details
-                      label="制造商扫描步数"
-                      max="50"
-                      min="5"
-                      :model-value="draft.manufacturer_scan_steps"
-                      type="number"
-                      @update:model-value="setDraftNumber('manufacturer_scan_steps', $event)"
-                    />
-                  </v-col>
-
-                  <v-col cols="12" sm="3">
+                  <v-col cols="12" sm="4">
                     <v-select
                       v-model="draft.log_level"
                       density="compact"

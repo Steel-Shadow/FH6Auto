@@ -177,10 +177,10 @@ class ImageWaitsService:
             max_steps = self.app.services.config.values.get("manufacturer_scan_steps", 50)
         try:
             max_steps = int(max_steps)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             max_steps = 50
 
-        max_steps = max(5, min(50, max_steps))
+        max_steps = max(5, min(100, max_steps))
 
         pos = self.app.services.ocr.find_manufacturer_text(
             target_text,
