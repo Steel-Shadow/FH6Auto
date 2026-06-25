@@ -52,6 +52,13 @@ class OcrService:
         self._engine: RapidOCR | None = None
         self._text_targets_cache: dict[tuple[str, ...], list[tuple[str, str]]] = {}
         self.last_positions: dict[str, Point] = {}
+        self._read_count = 0
+        self._reads_since_gc = 0
+        self._reads_since_recycle = 0
+        self._last_recycle_time = time.monotonic()
+        self._gc_read_interval = 200
+        self._recycle_read_interval = 1200
+        self._recycle_seconds = 30 * 60
         self._ensure_engine()
 
     @staticmethod
@@ -329,7 +336,30 @@ class OcrService:
 
         return None
 
+    def _mark_read_completed_locked(self) -> tuple[bool, bool]:
+        self._read_count += 1
+        self._reads_since_gc += 1
+        self._reads_since_recycle += 1
+        now = time.monotonic()
+
+        should_gc = self._reads_since_gc >= self._gc_read_interval
+        should_recycle = (
+            self._reads_since_recycle >= self._recycle_read_interval
+            or now - self._last_recycle_time >= self._recycle_seconds
+        )
+
+        if should_gc:
+            self._reads_since_gc = 0
+        if should_recycle:
+            self._engine = None
+            self._providers = {}
+            self._reads_since_recycle = 0
+            self._last_recycle_time = now
+        return should_gc, should_recycle
+
     def read(self, img: np.ndarray | str | Path, *, use_det=True, use_cls=True, text_score=0.5) -> list[OcrText]:
+        should_gc = False
+        should_recycle = False
         started = time.perf_counter()
         with self._lock:
             engine = self._ensure_engine()
@@ -349,6 +379,19 @@ class OcrService:
                 if idx < len(boxes):
                     box = tuple((float(x), float(y)) for x, y in boxes[idx])
                 output.append(OcrText(str(text), score, box))
+
+            should_gc, should_recycle = self._mark_read_completed_locked()
+            if should_recycle:
+                self.app.log(
+                    "OCR 引擎达到周期回收阈值，已释放当前会话，下次识别会重新初始化。",
+                    level="debug",
+                )
+                engine = None
+
+            del result, raw_texts, raw_scores, raw_boxes, texts, scores, boxes
+
+        if should_gc or should_recycle:
+            gc.collect()
             shape = ""
             if isinstance(img, np.ndarray) and img.ndim >= 2:
                 shape = f"{img.shape[1]}x{img.shape[0]}"
@@ -363,7 +406,8 @@ class OcrService:
                 items=len(output),
                 image=shape,
             )
-            return output
+        return output
+
 
     def recognize_line(self, img: np.ndarray | str | Path, *, min_score=0.5) -> OcrText | None:
         results = self.read(img, use_det=False, use_cls=False, text_score=min_score)
@@ -968,8 +1012,9 @@ class OcrService:
                 region = full_region
 
         sx, sy, sw, sh = map(int, region)
-        bottom_y = sy + int(sh * 0.80)
-        bottom_h = max(1, sh - int(sh * 0.80))
+        preferred_footer_h = max(1, int(sh * 0.20))
+        bottom_h = min(preferred_footer_h, 420)
+        bottom_y = sy + sh - bottom_h
         return [("底部提示栏", (sx, bottom_y, sw, bottom_h))]
 
     def find_footer_text_ui(self, target_text, region=None, threshold=0.65):

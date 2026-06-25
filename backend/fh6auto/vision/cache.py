@@ -223,6 +223,7 @@ class ImageCacheService:
     def capture_frame(self, region=None, mask_areas=None) -> CaptureFrame:
         """截取指定屏幕区域并返回带坐标原点的截图帧。"""
         capture_region = self.resolve_capture_region(region)
+        screen = None
         try:
             if capture_region is not None:
                 x, y, w, h = capture_region
@@ -233,8 +234,18 @@ class ImageCacheService:
         except Exception:
             screen = pyautogui.screenshot(region=capture_region)
 
-        screen_bgr = cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
-
+        try:
+            screen_rgb = np.asarray(screen, dtype=np.uint8)
+            if not screen_rgb.flags.c_contiguous:
+                screen_rgb = np.ascontiguousarray(screen_rgb)
+            if screen_rgb.ndim == 3 and screen_rgb.shape[2] == 4:
+                screen_bgr = cv2.cvtColor(screen_rgb, cv2.COLOR_RGBA2BGR)
+            else:
+                screen_bgr = cv2.cvtColor(screen_rgb, cv2.COLOR_RGB2BGR)
+        finally:
+            close = getattr(screen, "close", None)
+            if callable(close):
+                close()
         # 对指定区域打黑块，避免重复识别同一个目标
         if mask_areas:
             for rect in mask_areas:
