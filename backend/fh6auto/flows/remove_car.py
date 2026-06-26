@@ -127,12 +127,12 @@ class RemoveCarFlow:
                 self.app.services.input_actions.hw_press("enter")
                 sleep(0.5)
 
-            for i in range(4):
+            for _ in range(4):
                 self.app.services.input_actions.hw_press("down")
                 sleep(0.1)
             self.app.services.input_actions.hw_press("enter")
 
-            sleep(0.8)  # 等待“你确定要移除吗”的确认弹窗
+            sleep(0.5)  # 等待“你确定要移除吗”的确认弹窗
 
             # 确认移除操作 (按向下选"嗯"，然后回车)
             self.app.log("确认移除...", level="debug")

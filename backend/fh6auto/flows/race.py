@@ -258,15 +258,16 @@ class RaceFlow:
                 level="debug",
             )
 
-            pos = self.app.services.image_waits.wait_for_image_sift(
-                "start.png",
-                region=self.app.services.game_window.regions["左下"],
-                min_inliers=24,
-                timeout=30,
-                interval=1,
+            pos = self.app.services.image_waits.wait_for_footer_text_ui(
+                "选择",
             )
 
-            self.app.services.input_actions.game_click(pos)
+            if not pos:
+                self.app.log("未找到'选择'按钮。", level="warning")
+                return False
+            self.app.services.input_actions.hw_press("enter")
+            # self.app.services.input_actions.game_click(pos)
+
             sleep(4.0)
             self.app.services.input_actions.hw_key_down("w")
 

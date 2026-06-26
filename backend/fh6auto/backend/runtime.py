@@ -264,6 +264,8 @@ class BackendRuntimeService:
 
                 if next_idx <= curr_idx:
                     self.app.state.set_loop(self.app.state.loop_current + 1, loop_total)
+                    completed_loop = max(1, self.app.state.loop_current - 1)
+                    self.release_ocr_engine(f"大循环 {completed_loop} 结束")
 
                     if not options.infinite_loops and self.app.state.loop_current > total_loops:
                         self.app.log("达到设定的总循环次数，任务结束。")
@@ -278,6 +280,17 @@ class BackendRuntimeService:
         finally:
             self.stop_all(log_message="任务已停止，所有输入状态已重置。")
 
+    def release_ocr_engine(self, reason: str = "", *, level: str = "debug") -> None:
+        try:
+            released = self.app.services.ocr.release()
+        except Exception as e:
+            self.app.log(f"释放 OCR 引擎失败: {e}", level="warning")
+            return
+
+        if released:
+            suffix = f"（{reason}）" if reason else ""
+            self.app.log(f"OCR 引擎已释放{suffix}，下次识别会重新初始化。", level=level)
+
     def stop_all(self, log_message: str = "任务已停止，所有输入状态已重置。") -> None:
         was_running = self.app.state.is_running
         self.app.state.mark_idle()
@@ -287,11 +300,7 @@ class BackendRuntimeService:
         except Exception:
             pass
 
-        try:
-            if self.app.services.ocr.release():
-                self.app.log("OCR 引擎已释放，CUDA 会话将在下次识别时重新初始化。")
-        except Exception as e:
-            self.app.log(f"释放 OCR 引擎失败: {e}")
+        self.release_ocr_engine("任务停止")
 
         if was_running:
             self.app.log(log_message)
@@ -344,19 +353,13 @@ class BackendRuntimeService:
     def debug(self) -> None:
         is_running = self.app.state.is_running
         self.app.state.is_running = True
-
         time_start = time.time()
-        output = self.app.services.ocr.find_manufacturer_text("斯巴鲁")
+        self.app.services.game_window.check_and_focus_game()
+        manufacturer_pos = self.app.services.ocr.find_manufacturer_text("斯巴鲁")
+
         time_end = time.time()
-        self.app.log(f"Debug info: {output}, Time taken: {time_end - time_start}", level="debug")
-
-        # time_start = time.time()
-        # screen_bgr = self.app.services.image_cache.capture_region(self.app.services.game_window.regions["全界面"])
-        # output = self.app.services.ocr._find_manufacturer_cells(screen_bgr)
-        # time_end = time.time()
-        # self.app.log(f"Debug info: {output}, Time taken: {time_end - time_start}", level="debug")
-
         self.app.state.is_running = is_running
+        self.app.log(f"Debug info: {manufacturer_pos}, Time taken: {time_end - time_start}", level="debug")
 
     def ensure_running(self) -> None:
         self.check_pause()

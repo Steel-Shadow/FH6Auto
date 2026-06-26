@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
-from rapidocr import RapidOCR
+from rapidocr import EngineType, RapidOCR
 
 if TYPE_CHECKING:
     from ..backend.app import BackendApp
@@ -107,6 +107,9 @@ class OcrService:
             self._add_nvidia_dll_paths()
 
             params = {
+                "Det.engine_type": EngineType.ONNXRUNTIME,
+                "Cls.engine_type": EngineType.ONNXRUNTIME,
+                "Rec.engine_type": EngineType.ONNXRUNTIME,
                 "EngineConfig.onnxruntime.use_cuda": True,
                 "Global.log_level": "warning",
             }
@@ -124,8 +127,18 @@ class OcrService:
             return providers
 
         for name in ("text_det", "text_cls", "text_rec"):
-            session = getattr(getattr(getattr(self._engine, name, None), "session", None), "session", None)
-            providers[name] = session.get_providers() if session is not None else None
+            infer_session = getattr(getattr(self._engine, name, None), "session", None)
+            onnx_session = getattr(infer_session, "session", None)
+            if onnx_session is not None and hasattr(onnx_session, "get_providers"):
+                providers[name] = onnx_session.get_providers()
+                continue
+
+            device = getattr(infer_session, "device", None)
+            if device is not None:
+                providers[name] = [f"{type(infer_session).__name__}:{device}"]
+                continue
+
+            providers[name] = [type(infer_session).__name__] if infer_session is not None else None
         return providers
 
     @property
@@ -142,6 +155,9 @@ class OcrService:
 
             self._engine = None
             self._providers = {}
+            self._reads_since_gc = 0
+            self._reads_since_recycle = 0
+            self._last_recycle_time = time.monotonic()
 
         gc.collect()
         return True
@@ -1107,7 +1123,38 @@ class OcrService:
                 clusters[-1].append(value)
         return [int(round(sum(cluster) / len(cluster))) for cluster in clusters]
 
-    def _find_manufacturer_cells(self, screen_bgr):
+    def _find_manufacturer_header_box(self, screen_bgr) -> Box | None:
+        h, w = screen_bgr.shape[:2]
+        hsv = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(
+            hsv,
+            np.array([35, 80, 150], dtype=np.uint8),
+            np.array([90, 255, 255], dtype=np.uint8),
+        )
+        mask[: int(h * 0.10), :] = 0
+        mask[int(h * 0.42) :, :] = 0
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidates = []
+        for contour in contours:
+            x, y, box_w, box_h = cv2.boundingRect(contour)
+            if box_w < int(w * 0.45):
+                continue
+            if box_h < int(h * 0.035) or box_h > int(h * 0.09):
+                continue
+
+            area_ratio = cv2.contourArea(contour) / float(box_w * box_h)
+            if area_ratio < 0.75:
+                continue
+            candidates.append((box_w * box_h, x, y, box_w, box_h))
+
+        if not candidates:
+            return None
+
+        _, x, y, box_w, box_h = max(candidates, key=lambda item: item[0])
+        return (x, y, box_w, box_h)
+
+    def _find_manufacturer_white_cells(self, screen_bgr):
         h, w = screen_bgr.shape[:2]
         gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
         _, mask = cv2.threshold(gray, 234, 255, cv2.THRESH_BINARY)
@@ -1129,9 +1176,13 @@ class OcrService:
                 continue
             raw_cells.append((x, y, cell_w, cell_h))
 
+        return raw_cells
+
+    def _manufacturer_grid_from_cells(self, screen_bgr, raw_cells):
         if len(raw_cells) < 4:
             return raw_cells
 
+        h, w = screen_bgr.shape[:2]
         median_w = int(round(np.median([cell[2] for cell in raw_cells])))
         median_h = int(round(np.median([cell[3] for cell in raw_cells])))
         x_positions = self._cluster_axis_positions([cell[0] for cell in raw_cells], max(12, median_w // 4))
@@ -1156,6 +1207,89 @@ class OcrService:
                     grid_cells.append(cell)
 
         return grid_cells or raw_cells
+
+    def _manufacturer_grid_bottom(self, screen_bgr, header_box: Box) -> int | None:
+        h, w = screen_bgr.shape[:2]
+        header_x, header_y, header_w, header_h = header_box
+        x1 = max(0, header_x + header_w - 2)
+        x2 = min(w, header_x + header_w + 14)
+        y1 = max(0, header_y + header_h)
+        y2 = min(h, int(h * 0.90))
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
+        band = gray[y1:y2, x1:x2]
+        line_mask = (band > 90) & (band < 245)
+        row_scores = np.mean(line_mask, axis=1)
+        rows = np.where(row_scores > 0.20)[0]
+        if rows.size == 0:
+            return None
+
+        return int(y1 + rows.max())
+
+    def _manufacturer_grid_cells(self, screen_bgr, raw_cells):
+        header_box = self._find_manufacturer_header_box(screen_bgr)
+        if header_box is None:
+            return []
+
+        h, w = screen_bgr.shape[:2]
+        header_x, header_y, header_w, header_h = header_box
+        col_count = 4
+        col_step = header_w / float(col_count)
+
+        if len(raw_cells) >= 4:
+            median_h = int(round(np.median([cell[3] for cell in raw_cells])))
+            y_positions = self._cluster_axis_positions([cell[1] for cell in raw_cells], max(8, median_h // 2))
+            y_diffs = [b - a for a, b in zip(y_positions, y_positions[1:]) if b > a]
+            row_step = int(round(np.median(y_diffs))) if y_diffs else max(24, int(round(header_h * 0.73)))
+            cell_h = median_h
+        else:
+            row_step = max(24, int(round(header_h * 0.73)))
+            cell_h = max(20, row_step - 3)
+
+        cell_w = max(60, int(round(col_step)) - 3)
+        first_row_y = header_y + header_h + max(1, int(round(header_h * 0.07)))
+        if raw_cells:
+            raw_top = min(cell[1] for cell in raw_cells)
+            if abs(raw_top - first_row_y) <= max(6, row_step // 3):
+                first_row_y = raw_top
+
+        detected_bottom = self._manufacturer_grid_bottom(screen_bgr, header_box)
+        fallback_bottom = int(h * 0.86)
+        table_bottom = detected_bottom if detected_bottom is not None else fallback_bottom
+        table_bottom = max(table_bottom, first_row_y + cell_h)
+        table_bottom = min(h, max(table_bottom, fallback_bottom))
+
+        row_count = max(1, min(16, int((table_bottom - first_row_y) // row_step) + 1))
+
+        cells = []
+        seen = set()
+        for row in range(row_count):
+            y = int(round(first_row_y + row * row_step))
+            if y >= h:
+                break
+            for col in range(col_count):
+                x = int(round(header_x + col * col_step + 1))
+                cell = (
+                    max(0, x),
+                    max(0, y),
+                    min(cell_w, w - x),
+                    min(cell_h, h - y),
+                )
+                key = (cell[0] // 4, cell[1] // 4)
+                if cell[2] > 0 and cell[3] > 0 and key not in seen:
+                    seen.add(key)
+                    cells.append(cell)
+
+        return cells
+
+    def _find_manufacturer_cells(self, screen_bgr):
+        raw_cells = self._find_manufacturer_white_cells(screen_bgr)
+        grid_cells = self._manufacturer_grid_cells(screen_bgr, raw_cells)
+        if grid_cells:
+            return grid_cells
+        return self._manufacturer_grid_from_cells(screen_bgr, raw_cells)
 
     def find_manufacturer_text(self, target_text, region=None, threshold=0.75):
         """在当前画面的制造商表格中定位目标文字。"""

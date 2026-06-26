@@ -124,12 +124,7 @@ class ImageWaitsService:
     ):
         """查找目标制造商；当前画面未命中时自动翻动整个制造商列表。"""
         if max_steps is None:
-            max_steps = self.app.services.config.values.get("manufacturer_scan_steps", 50)
-        try:
-            max_steps = int(max_steps)
-        except (TypeError, ValueError):
-            max_steps = 50
-
+            max_steps = int(self.app.services.config.values.get("manufacturer_scan_steps", 50))
         max_steps = max(5, min(100, max_steps))
 
         pos = self.app.services.ocr.find_manufacturer_text(
@@ -147,9 +142,6 @@ class ImageWaitsService:
                 level="debug",
             )
             for step in range(steps):
-                if not self.app.state.is_running:
-                    return None
-
                 self.app.services.input_actions.hw_press(direction)
                 self._sleep_while_running(0.18)
 
