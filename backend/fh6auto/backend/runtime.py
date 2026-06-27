@@ -355,11 +355,13 @@ class BackendRuntimeService:
         self.app.state.is_running = True
         time_start = time.time()
         self.app.services.game_window.check_and_focus_game()
-        manufacturer_pos = self.app.services.ocr.find_manufacturer_text("斯巴鲁")
-
+        pos_el = self.app.services.image_matcher.find_image_sift(
+            "eventlab.png",
+            min_inliers=12,
+        )
         time_end = time.time()
         self.app.state.is_running = is_running
-        self.app.log(f"Debug info: {manufacturer_pos}, Time taken: {time_end - time_start}", level="debug")
+        self.app.log(f"Debug info: {pos_el}, Time taken: {time_end - time_start}", level="debug")
 
     def ensure_running(self) -> None:
         self.check_pause()

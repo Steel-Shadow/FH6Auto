@@ -164,34 +164,10 @@ class RaceFlow:
             self.app.services.input_actions.hw_press("pagedown", delay=0.15)
             sleep(0.3)
 
-        sleep(0.8)
-
-        pos_el = self.app.services.image_waits.wait_for_image_sift(
-            "eventlab.png",
-            min_inliers=12,
-            timeout=5,
-        )
-
-        if not pos_el:
-            self.app.log("未找到 eventlab", level="warning")
-            return False
-
-        self.app.services.input_actions.game_click(pos_el)
-        sleep(1.2)
-
-        pos_yg = self.app.services.image_waits.wait_for_image_sift(
-            "playenent.png",
-            region=self.app.services.game_window.regions["中间"],
-            min_inliers=10,
-            timeout=40,
-            interval=0.3,
-        )
-        if not pos_yg:
-            self.app.log("未找到游玩赛事", level="warning")
-            return False
-
-        self.app.services.input_actions.game_click(pos_yg)
-        sleep(1.5)
+        self.app.services.input_actions.hw_press("enter")
+        sleep(1.0)
+        self.app.services.input_actions.hw_press("enter")
+        sleep(1.0)
 
         if not self._select_event_by_share_code():
             return False

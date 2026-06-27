@@ -86,28 +86,14 @@ class BuyCarFlow:
         self.app.services.input_actions.hw_press("pageup")
         sleep(0.5)
 
-        pos_collectionjournal = self.app.services.image_matcher.find_image_sift(
-            "collectionjournal.png",
-            region=self.app.services.game_window.regions["左"],
-            min_inliers=20,
-        )
-        if not pos_collectionjournal:
-            self.app.log("未找到收集簿", level="warning")
-            return False
-
-        self.app.services.input_actions.game_click(pos_collectionjournal, double=True)
+        self.app.services.input_actions.hw_press("left")
+        sleep(0.1)
+        self.app.services.input_actions.hw_press("enter")
         sleep(1.0)
-
-        pos_masterexplorer = self.app.services.image_waits.wait_for_image_sift(
-            "masterexplorer.png",
-            min_inliers=20,
-        )
-        if not pos_masterexplorer:
-            self.app.log("未找到探索", level="warning")
-            return False
-
-        self.app.services.input_actions.game_click(pos_masterexplorer, double=True)
-        sleep(0.6)
+        self.app.services.input_actions.hw_press("right")
+        sleep(0.1)
+        self.app.services.input_actions.hw_press("enter")
+        sleep(1.0)
 
         pos_carcollection = self.app.services.image_waits.wait_for_image_sift(
             "carcollection.png",
