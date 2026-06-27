@@ -27,7 +27,6 @@ class CarCardSearchOptions:
     exclude_tag_threshold: float = 0.65
     max_candidates: int = 80
     mask_areas: Any = None
-    template_fallback: bool = False
     start_page: int = 0
     max_pages: int = 5
     page_step_presses: int = 4
@@ -112,7 +111,6 @@ class CarCardPageSelector:
                 exclude_tag_threshold=options.exclude_tag_threshold,
                 max_candidates=options.max_candidates,
                 mask_areas=options.mask_areas,
-                template_fallback=options.template_fallback,
             )
             if pos:
                 return pos

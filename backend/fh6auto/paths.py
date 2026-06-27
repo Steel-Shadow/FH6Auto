@@ -25,9 +25,6 @@ USER_CONFIG_FILE = os.path.join(APP_DIR, "config.json")
 RUN_STARTED_AT = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 LOG_DIR = os.path.join(APP_DIR, "log")
 LOG_FILE = os.path.join(LOG_DIR, f"{RUN_STARTED_AT}.log")
-CACHE_DIR = os.path.join(APP_DIR, "cache")
-TEMPLATE_CACHE_FILE = os.path.join(CACHE_DIR, "template_cache.pkl")
-TEMPLATE_META_FILE = os.path.join(CACHE_DIR, "template_meta.json")
 
 
 def auto_extract_images(folder_name: str = "images") -> None:

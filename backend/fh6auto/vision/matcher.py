@@ -281,7 +281,61 @@ class ImageMatcherService:
         return text
 
     @staticmethod
+    def _contour_circularity(contour) -> float:
+        area = cv2.contourArea(contour)
+        perimeter = cv2.arcLength(contour, True)
+        if area <= 0 or perimeter <= 0:
+            return 0.0
+        return float(4.0 * np.pi * area / (perimeter * perimeter))
+
+    @staticmethod
+    def _has_favorite_badge(card_bgr) -> bool:
+        """检测车辆卡右下角的收藏爱心图标。
+
+        只在稳定的局部区域内做暗色连通域/形状检测，不做像素模板匹配。
+        """
+        if card_bgr is None or card_bgr.size == 0:
+            return False
+
+        card_h, card_w = card_bgr.shape[:2]
+        x1 = int(round(card_w * 0.68))
+        y1 = int(round(card_h * 0.60))
+        x2 = min(card_w, int(round(card_w * 0.88)))
+        y2 = min(card_h, int(round(card_h * 0.88)))
+        search = card_bgr[y1:y2, x1:x2]
+        if search.size == 0:
+            return False
+
+        gray = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
+        mask = cv2.inRange(gray, 0, 70)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8), iterations=1)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        min_w = max(5, int(card_w * 0.030))
+        min_h = max(5, int(card_h * 0.030))
+        max_w = max(min_w + 1, int(card_w * 0.110))
+        max_h = max(min_h + 1, int(card_h * 0.110))
+
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if not (min_w <= w <= max_w and min_h <= h <= max_h):
+                continue
+            aspect = w / max(1, h)
+            if not 0.70 <= aspect <= 1.45:
+                continue
+            area = cv2.contourArea(contour)
+            fill_ratio = area / max(1, w * h)
+            if not 0.28 <= fill_ratio <= 0.90:
+                continue
+            circularity = ImageMatcherService._contour_circularity(contour)
+            if 0.18 <= circularity <= 0.95:
+                return True
+
+        return False
+
+    @staticmethod
     def _has_driving_badge(card_bgr) -> bool:
+        """检测车辆卡右下角绿色正在驾驶方向盘图标。"""
         if card_bgr is None or card_bgr.size == 0:
             return False
 
@@ -314,8 +368,25 @@ class ImageMatcherService:
                 continue
 
             badge_gray = cv2.cvtColor(search[y : y + h, x : x + w], cv2.COLOR_BGR2GRAY)
-            black_ratio = np.count_nonzero(badge_gray < 80) / area
-            if black_ratio >= 0.06:
+            black_mask = cv2.inRange(badge_gray, 0, 80)
+            black_ratio = np.count_nonzero(black_mask) / area
+            if black_ratio < 0.06:
+                continue
+
+            icon_contours, _ = cv2.findContours(black_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for icon_contour in icon_contours:
+                icon_area = cv2.contourArea(icon_contour)
+                if icon_area < max(4, area * 0.035):
+                    continue
+                ix, iy, iw, ih = cv2.boundingRect(icon_contour)
+                if iw < 3 or ih < 3:
+                    continue
+                aspect = iw / max(1, ih)
+                circularity = ImageMatcherService._contour_circularity(icon_contour)
+                if 0.55 <= aspect <= 1.80 and circularity >= 0.12:
+                    return True
+
+            if black_ratio >= 0.14:
                 return True
 
         return False
@@ -377,7 +448,24 @@ class ImageMatcherService:
         self._tag_contour_cache[actual_path] = data
         return data
 
+    @staticmethod
+    def _icon_kind_from_path(tag_path) -> str | None:
+        if not tag_path:
+            return None
+        name = os.path.basename(str(tag_path)).lower()
+        if "liketag" in name or ("like" in name and "author" not in name):
+            return "favorite"
+        if "driving" in name or "wheel" in name or "steering" in name:
+            return "driving"
+        return None
+
     def _match_tag_contour_score(self, roi, tag_path) -> float:
+        icon_kind = self._icon_kind_from_path(tag_path)
+        if icon_kind == "favorite":
+            return 1.0 if self._has_favorite_badge(roi) else 0.0
+        if icon_kind == "driving":
+            return 1.0 if self._has_driving_badge(roi) else 0.0
+
         template = self._tag_contour_template(tag_path)
         if template is None or roi is None or roi.size == 0:
             return 0.0
@@ -524,10 +612,6 @@ class ImageMatcherService:
         if not boxes:
             return []
 
-        screen_texts = self._ocr_texts_for_image(screen_bgr)
-        if not screen_texts:
-            return []
-
         required_tag_text = self._normalize_tag_text(required_tag_text)
         excluded_tag_text = self._normalize_tag_text(excluded_tag_text)
         candidates: list[CarCardOcrCandidate] = []
@@ -536,11 +620,7 @@ class ImageMatcherService:
             roi = screen_bgr[y : y + h, x : x + w]
             if exclude_driving and self._has_driving_badge(roi):
                 continue
-            card_texts = tuple(
-                text
-                for text in screen_texts
-                if x <= text.center[0] <= x + w and y <= text.center[1] <= y + h
-            )
+            card_texts = tuple(self._ocr_texts_for_image(roi))
             if not card_texts:
                 continue
 
@@ -585,277 +665,6 @@ class ImageMatcherService:
         )
         return candidates
 
-    def _match_region_score(self, roi, template, template_rect, search_rect=None, mode="color"):
-        try:
-            tpl_part = self._crop_ratio(template, *template_rect)
-            search_part = self._crop_ratio(roi, *(search_rect or template_rect))
-
-            if mode == "gray":
-                tpl_part = self.image_cache.to_gray_image(tpl_part)
-                search_part = self.image_cache.to_gray_image(search_part)
-            elif mode == "edge":
-                tpl_part = self.image_cache.to_edge_image(tpl_part)
-                search_part = self.image_cache.to_edge_image(search_part)
-
-            return self.image_cache.match_template_score(search_part, tpl_part)
-        except Exception:
-            return 0.0
-
-    def _match_required_tag(self, roi, tag_path, threshold, scales=None):
-        if not tag_path:
-            return 1.0
-
-        best_score = 0.0
-        scales_to_try = scales if scales is not None else self.image_cache.get_scales_to_try(fast_mode=True)
-        for scale in scales_to_try:
-            score = self.image_cache.match_text_ui_score(roi, tag_path, scale)
-            best_score = max(best_score, score)
-            if best_score >= threshold:
-                return best_score
-        return best_score
-
-    def _car_card_candidate_scores(
-        self,
-        roi,
-        template,
-        required_tag_path,
-        excluded_tag_path,
-        tag_threshold,
-        tag_scales=None,
-    ):
-        roi_gray = self.image_cache.to_gray_image(roi)
-        tpl_gray = self.image_cache.to_gray_image(template)
-
-        full_score = self.image_cache.match_template_score(roi, template)
-        gray_score = self.image_cache.match_template_score(roi_gray, tpl_gray)
-        title_score = self._match_region_score(
-            roi,
-            template,
-            template_rect=(0.03, 0.00, 0.97, 0.28),
-            search_rect=(0.02, 0.00, 0.98, 0.34),
-            mode="gray",
-        )
-        body_score = self._match_region_score(
-            roi,
-            template,
-            template_rect=(0.05, 0.24, 0.95, 0.75),
-            search_rect=(0.02, 0.18, 0.98, 0.78),
-            mode="edge",
-        )
-        rarity_score = self._match_region_score(
-            roi,
-            template,
-            template_rect=(0.02, 0.78, 0.72, 0.99),
-            search_rect=(0.00, 0.74, 0.76, 1.00),
-            mode="color",
-        )
-        pi_score = self._match_region_score(
-            roi,
-            template,
-            template_rect=(0.72, 0.78, 0.99, 0.99),
-            search_rect=(0.67, 0.74, 1.00, 1.00),
-            mode="color",
-        )
-        required_tag_score = self._match_required_tag(roi, required_tag_path, tag_threshold, scales=tag_scales)
-        excluded_tag_score = self._match_required_tag(roi, excluded_tag_path, tag_threshold, scales=tag_scales)
-
-        final_score = (
-            title_score * 0.30
-            + pi_score * 0.22
-            + rarity_score * 0.16
-            + body_score * 0.14
-            + gray_score * 0.10
-            + full_score * 0.08
-        )
-
-        return {
-            "final": final_score,
-            "full": full_score,
-            "gray": gray_score,
-            "title": title_score,
-            "body": body_score,
-            "rarity": rarity_score,
-            "pi": pi_score,
-            "required_tag": required_tag_score,
-            "excluded_tag": excluded_tag_score,
-        }
-
-    def _car_card_failed_checks(
-        self,
-        scores,
-        required_tag_path,
-        excluded_tag_path,
-        final_threshold,
-        title_threshold,
-        pi_threshold,
-        rarity_threshold,
-        body_threshold,
-        tag_threshold,
-        exclude_tag_threshold,
-    ):
-        failed = []
-        if scores["title"] < title_threshold:
-            failed.append("title")
-        if scores["pi"] < pi_threshold:
-            failed.append("pi")
-        if scores["rarity"] < rarity_threshold:
-            failed.append("rarity")
-        if scores["body"] < body_threshold:
-            failed.append("body")
-        if required_tag_path and scores["required_tag"] < tag_threshold:
-            failed.append("required_tag")
-        if excluded_tag_path and scores["excluded_tag"] >= exclude_tag_threshold:
-            failed.append("excluded_tag")
-        if scores["final"] < final_threshold:
-            failed.append("final")
-        return failed
-
-    def _find_car_card_sift_candidate(
-        self,
-        card_path,
-        screen_bgr,
-        template,
-        min_inliers=10,
-        ratio=0.75,
-        max_features=3000,
-        ransac_reproj_threshold=5.0,
-    ):
-        reference_data = self._get_sift_reference_features(card_path, max_features=max_features)
-        if reference_data is None:
-            return None
-
-        screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
-        sift = cv2.SIFT_create(nfeatures=int(max_features))
-        screen_keypoints, screen_descriptors = sift.detectAndCompute(screen_gray, None)
-        result = self._match_sift_reference(
-            card_path,
-            reference_data,
-            screen_keypoints,
-            screen_descriptors,
-            screen_bgr.shape,
-            min_inliers=min_inliers,
-            ratio=ratio,
-            ransac_reproj_threshold=ransac_reproj_threshold,
-        )
-        if not result:
-            return None
-
-        projected = result.get("projected")
-        if projected is None:
-            return None
-
-        ref_h, ref_w = template.shape[:2]
-        projected = projected.astype(np.float32)
-        target = np.float32([[0, 0], [ref_w, 0], [ref_w, ref_h], [0, ref_h]])
-        transform = cv2.getPerspectiveTransform(projected, target)
-        roi = cv2.warpPerspective(screen_bgr, transform, (ref_w, ref_h))
-
-        center_x, center_y = result["center"]
-        return {
-            "roi": roi,
-            "pos": (int(round(center_x)), int(round(center_y))),
-            "sort_key": (
-                float(projected[:, 0].min()),
-                float(projected[:, 1].min()),
-            ),
-            "scale": result["scale"],
-            "inliers": result["inliers"],
-            "good": result["good"],
-        }
-
-    def _match_vehicle_region_score(self, roi, template):
-        try:
-            tpl_part = self._crop_ratio(template, 0.05, 0.24, 0.95, 0.75)
-            roi_part = self._crop_ratio(roi, 0.05, 0.24, 0.95, 0.75)
-            if tpl_part.shape[0] < 40 or tpl_part.shape[1] < 40 or roi_part.shape[0] < 40 or roi_part.shape[1] < 40:
-                return 0.0
-
-            target_size = (240, 130)
-            tpl_part = cv2.resize(tpl_part, target_size, interpolation=cv2.INTER_AREA)
-            roi_part = cv2.resize(roi_part, target_size, interpolation=cv2.INTER_AREA)
-            tpl_gray = cv2.cvtColor(tpl_part, cv2.COLOR_BGR2GRAY)
-            roi_gray = cv2.cvtColor(roi_part, cv2.COLOR_BGR2GRAY)
-
-            orb = cv2.ORB_create(nfeatures=500)
-            tpl_keypoints, tpl_descriptors = orb.detectAndCompute(tpl_gray, None)
-            roi_keypoints, roi_descriptors = orb.detectAndCompute(roi_gray, None)
-            if (
-                tpl_descriptors is None
-                or roi_descriptors is None
-                or len(tpl_keypoints) < 12
-                or len(roi_keypoints) < 12
-            ):
-                return 0.0
-
-            matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
-            raw_matches = matcher.knnMatch(tpl_descriptors, roi_descriptors, k=2)
-            good_matches = []
-            for pair in raw_matches:
-                if len(pair) != 2:
-                    continue
-                first, second = pair
-                if first.distance < 0.75 * second.distance:
-                    good_matches.append(first)
-
-            return len(good_matches) / max(1, min(len(tpl_keypoints), len(roi_keypoints)))
-        except Exception:
-            return 0.0
-
-    def _find_car_card_segment_candidates(
-        self,
-        screen_bgr,
-        template,
-        required_tag_path,
-        excluded_tag_path,
-        tag_threshold,
-        exclude_driving=False,
-    ):
-        ref_h, ref_w = template.shape[:2]
-        candidates = []
-        tag_scales = (0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15)
-
-        for x, y, w, h in self._segment_car_card_boxes(screen_bgr):
-            roi = screen_bgr[y : y + h, x : x + w]
-            if roi.size == 0:
-                continue
-            if exclude_driving and self._has_driving_badge(roi):
-                continue
-
-            normalized = cv2.resize(roi, (ref_w, ref_h), interpolation=cv2.INTER_AREA)
-            scores = self._car_card_candidate_scores(
-                normalized,
-                template,
-                required_tag_path=required_tag_path,
-                excluded_tag_path=excluded_tag_path,
-                tag_threshold=tag_threshold,
-                tag_scales=tag_scales,
-            )
-            vehicle_score = self._match_vehicle_region_score(normalized, template)
-            layout_score = (
-                scores["pi"] * 0.32
-                + scores["rarity"] * 0.24
-                + vehicle_score * 0.20
-                + scores["gray"] * 0.15
-                + scores["full"] * 0.07
-                + scores["body"] * 0.02
-                + max(scores["title"], 0.0) * 0.04
-            )
-            scores["vehicle"] = vehicle_score
-            scores["layout"] = layout_score
-            scores["final"] = max(scores["final"], layout_score)
-            scores["scale"] = (w * h / float(ref_w * ref_h)) ** 0.5
-
-            candidates.append(
-                {
-                    "pos": (int(x + w // 2), int(y + h // 2)),
-                    "scores": scores,
-                    "sort_key": (x, y),
-                    "method": "segment",
-                }
-            )
-
-        return candidates
-
     def find_car_card(
         self,
         card_path,
@@ -876,7 +685,6 @@ class ImageMatcherService:
         exclude_tag_threshold=0.65,
         max_candidates=80,
         mask_areas=None,
-        template_fallback=False,
     ):
         if not self.state.is_running:
             return None
@@ -884,9 +692,6 @@ class ImageMatcherService:
         started = time.perf_counter()
         capture_ms = None
         ocr_ms = None
-        sift_ms = None
-        segment_ms = None
-        template_ms = None
         candidates_count = 0
         result_text = "miss"
         method = "-"
@@ -895,13 +700,13 @@ class ImageMatcherService:
             frame = self.image_cache.capture_frame(region, mask_areas=mask_areas)
             capture_ms = self._elapsed_ms(capture_started)
             screen_bgr = frame.image
-            candidates = []
-            template_orig, _ = self.image_cache.load_template(card_path)
-            if template_orig is None:
-                result_text = "template_missing"
-                return None
 
             target_spec = self._read_car_card_spec_from_template(card_path)
+            if target_spec is None:
+                result_text = "target_spec_missing"
+                self.log(f"[CarCardOCR] 无法从参考图读取目标车辆字段: {card_path}", level="debug")
+                return None
+
             ocr_started = time.perf_counter()
             ocr_candidates = self._find_car_card_ocr_candidates(
                 card_path,
@@ -916,8 +721,9 @@ class ImageMatcherService:
                 target=target_spec,
             )
             ocr_ms = self._elapsed_ms(ocr_started)
+            candidates_count = len(ocr_candidates)
             if ocr_candidates:
-                best_ocr = ocr_candidates[0]
+                best_ocr = ocr_candidates[: max(1, int(max_candidates))][0]
                 pos = frame.to_screen_point(best_ocr.pos)
                 self.last_positions[card_path] = pos
                 spec = best_ocr.spec
@@ -928,206 +734,20 @@ class ImageMatcherService:
                     f"全新:{'是' if spec.is_new else '否'}",
                     level="debug",
                 )
-                candidates_count = len(ocr_candidates)
                 result_text = "hit"
                 method = "ocr"
                 return pos
-            if target_spec is not None:
-                # self.log(
-                #     f"[CarCardOCR] 未命中: {card_path} | 目标字段: "
-                #     f"车型={target_spec.title or '-'}, 制造商={target_spec.manufacturer or '-'}, "
-                #     f"稀有度={target_spec.rarity or '-'}, "
-                #     f"PI={target_spec.car_class or '-'} {target_spec.pi or '-'}, "
-                #     f"年份={target_spec.year or '-'}, 全新={'是' if target_spec.is_new else '否'}"
-                # )
-                result_text = "target_spec_miss"
-                return None
 
-            sift_started = time.perf_counter()
-            sift_candidate = self._find_car_card_sift_candidate(card_path, screen_bgr, template_orig)
-            sift_ms = self._elapsed_ms(sift_started)
-            if sift_candidate is not None and not (
-                exclude_driving and self._has_driving_badge(sift_candidate["roi"])
-            ):
-                scores = self._car_card_candidate_scores(
-                    sift_candidate["roi"],
-                    template_orig,
-                    required_tag_path=required_tag_path,
-                    excluded_tag_path=excluded_tag_path,
-                    tag_threshold=tag_threshold,
-                    tag_scales=(0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15),
-                )
-                scores["scale"] = sift_candidate["scale"]
-                scores["inliers"] = sift_candidate["inliers"]
-                scores["good"] = sift_candidate["good"]
-                failed = self._car_card_failed_checks(
-                    scores,
-                    required_tag_path,
-                    excluded_tag_path,
-                    final_threshold,
-                    title_threshold,
-                    pi_threshold,
-                    rarity_threshold,
-                    min(body_threshold, 0.40),
-                    tag_threshold,
-                    exclude_tag_threshold,
-                )
-                if not failed:
-                    candidates.append(
-                        {
-                            "pos": frame.to_screen_point(sift_candidate["pos"]),
-                            "scores": scores,
-                            "sort_key": sift_candidate["sort_key"],
-                            "method": "sift",
-                        }
-                    )
-
-            if not candidates:
-                segment_started = time.perf_counter()
-                segment_candidates = self._find_car_card_segment_candidates(
-                    screen_bgr,
-                    template_orig,
-                    required_tag_path=required_tag_path,
-                    excluded_tag_path=excluded_tag_path,
-                    tag_threshold=tag_threshold,
-                    exclude_driving=exclude_driving,
-                )
-                segment_ms = self._elapsed_ms(segment_started)
-                for segment_candidate in segment_candidates:
-                    scores = segment_candidate["scores"]
-                    failed = []
-                    if scores["layout"] < max(0.50, min(final_threshold, 0.55)):
-                        failed.append("layout")
-                    if scores["pi"] < min(pi_threshold, 0.50):
-                        failed.append("pi")
-                    if scores["rarity"] < min(rarity_threshold, 0.50):
-                        failed.append("rarity")
-                    if scores.get("vehicle", 0.0) < 0.12:
-                        failed.append("vehicle")
-                    if required_tag_path and scores["required_tag"] < min(tag_threshold, 0.65):
-                        failed.append("required_tag")
-                    if excluded_tag_path and scores["excluded_tag"] >= exclude_tag_threshold:
-                        failed.append("excluded_tag")
-
-                    if "excluded_tag" in failed:
-                        self.log(
-                            f"[CarCardMatch] 排除候选: {card_path} | 排除标签 {excluded_tag_path}: "
-                            f"{scores['excluded_tag']:.3f}",
-                            level="debug",
-                        )
-                    if failed:
-                        continue
-                    adjusted_candidate = dict(segment_candidate)
-                    px, py = adjusted_candidate["pos"]
-                    adjusted_candidate["pos"] = frame.to_screen_point((px, py))
-                    candidates.append(adjusted_candidate)
-
-            template_started = time.perf_counter()
-            for scale in (
-                () if candidates or not template_fallback else self.image_cache.get_scales_to_try(fast_mode=fast_mode)
-            ):
-                card_tpl, _ = self.image_cache.get_scaled_template(card_path, scale)
-                if card_tpl is None:
-                    continue
-
-                h, w = card_tpl.shape[:2]
-                if h < 30 or w < 30 or h > screen_bgr.shape[0] or w > screen_bgr.shape[1]:
-                    continue
-
-                res = cv2.matchTemplate(screen_bgr, card_tpl, cv2.TM_CCOEFF_NORMED)
-                flat = res.ravel()
-                if flat.size == 0:
-                    continue
-
-                top_k = min(int(max_candidates), flat.size)
-                idxs = np.argpartition(flat, -top_k)[-top_k:]
-                idxs = idxs[np.argsort(flat[idxs])[::-1]]
-                checked = set()
-
-                for idx in idxs:
-                    y, x = np.unravel_index(idx, res.shape)
-                    base_score = float(res[y, x])
-                    if base_score < candidate_threshold:
-                        continue
-
-                    key = (x // 10, y // 10)
-                    if key in checked:
-                        continue
-                    checked.add(key)
-
-                    roi = screen_bgr[y : y + h, x : x + w]
-                    if roi.shape[:2] != card_tpl.shape[:2]:
-                        continue
-                    if exclude_driving and self._has_driving_badge(roi):
-                        continue
-
-                    scores = self._car_card_candidate_scores(
-                        roi,
-                        card_tpl,
-                        required_tag_path=required_tag_path,
-                        excluded_tag_path=excluded_tag_path,
-                        tag_threshold=tag_threshold,
-                        tag_scales=(scale, scale * 0.98, scale * 1.02),
-                    )
-                    scores["base"] = base_score
-                    scores["scale"] = scale
-
-                    failed = self._car_card_failed_checks(
-                        scores,
-                        required_tag_path,
-                        excluded_tag_path,
-                        final_threshold,
-                        title_threshold,
-                        pi_threshold,
-                        rarity_threshold,
-                        body_threshold,
-                        tag_threshold,
-                        exclude_tag_threshold,
-                    )
-                    if "excluded_tag" in failed:
-                        self.log(
-                            f"[CarCardMatch] 排除候选: {card_path} | 排除标签 {excluded_tag_path}: "
-                            f"{scores['excluded_tag']:.3f}",
-                            level="debug",
-                        )
-                    if failed:
-                        continue
-
-                    candidates.append(
-                        {
-                            "pos": frame.to_screen_point((x + w // 2, y + h // 2)),
-                            "scores": scores,
-                            "sort_key": (x, y),
-                            "method": "template",
-                        }
-                    )
-            template_ms = self._elapsed_ms(template_started)
-
-            if not candidates:
-                return None
-
-            # 同一页有多个目标时，先处理最左列并在列内从上到下，减少横向翻页。
-            candidates.sort(
-                key=lambda item: self._car_card_column_order(
-                    item["sort_key"][0],
-                    item["sort_key"][1],
-                    item["scores"]["final"],
-                )
-            )
-            best = candidates[0]
-            scores = best["scores"]
-            self.last_positions[card_path] = best["pos"]
-            candidates_count = len(candidates)
-            result_text = "hit"
-            method = best.get("method", "template")
+            result_text = "ocr_miss"
             self.log(
-                f"[CarCardMatch] 锁定: {card_path} | 方法:{best.get('method', 'template')} | 综合:{scores['final']:.3f} | "
-                f"标题:{scores['title']:.3f} | PI:{scores['pi']:.3f} | 稀有度:{scores['rarity']:.3f} | "
-                f"车身:{scores['body']:.3f} | 车辆:{scores.get('vehicle', 0.0):.3f} | "
-                f"标签:{scores['required_tag']:.3f} | 缩放:{scores['scale']:.3f}",
+                f"[CarCardOCR] 未命中: {card_path} | 目标字段: "
+                f"车型={target_spec.title or '-'}, 制造商={target_spec.manufacturer or '-'}, "
+                f"稀有度={target_spec.rarity or '-'}, "
+                f"PI={target_spec.car_class or '-'} {target_spec.pi or '-'}, "
+                f"年份={target_spec.year or '-'}, 全新={'是' if target_spec.is_new else '否'}",
                 level="debug",
             )
-            return best["pos"]
+            return None
 
         except Exception as e:
             result_text = "error"
@@ -1139,9 +759,6 @@ class ImageMatcherService:
                 started,
                 capture_ms=capture_ms,
                 ocr_ms=ocr_ms,
-                sift_ms=sift_ms,
-                segment_ms=segment_ms,
-                template_ms=template_ms,
                 candidates=candidates_count,
                 method=method,
                 result=result_text,

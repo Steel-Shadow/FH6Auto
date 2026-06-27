@@ -47,7 +47,6 @@ class BackendApp:
 
     def _background_init(self) -> None:
         auto_extract_images()
-        self.services.image_cache.prepare_template_cache()
 
     def snapshot(self) -> dict[str, Any]:
         runtime = self.state.snapshot()
