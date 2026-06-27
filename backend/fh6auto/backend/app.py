@@ -16,11 +16,11 @@ class BackendApp:
         self.version = version("fh6auto")
         self._log_file_lock = threading.RLock()
 
-        self.services = AppServices(self)
+        self.services = AppServices(state=self.state, log=self.log)
         self.services.config.load()
         self.services.game_window.init_regions()
 
-        self.flows = AppFlows(self)
+        self.flows = AppFlows(state=self.state, services=self.services, log=self.log)
 
         self.services.input_actions.apply_input_backend(log_change=False)
         self.services.runtime.start_hotkey_listener()

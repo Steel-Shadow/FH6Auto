@@ -4,7 +4,7 @@ import json
 import os
 import pickle
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -19,9 +19,6 @@ from ..paths import (
     TEMPLATE_META_FILE,
     get_img_path,
 )
-
-if TYPE_CHECKING:
-    from ..backend.app import BackendApp
 
 Point = tuple[int, int]
 Region = tuple[int, int, int, int]
@@ -64,8 +61,9 @@ class CaptureFrame:
 
 
 class ImageCacheService:
-    def __init__(self, app: BackendApp) -> None:
-        self.app = app
+    def __init__(self, *, game_window: Any, log: Callable[[str], None]) -> None:
+        self.game_window = game_window
+        self.log = log
         self.template_cache = {}
         self.scaled_template_cache = {}
         self.file_template_cache = {}
@@ -136,12 +134,12 @@ class ImageCacheService:
         return cached_meta == new_meta
 
     def build_template_file_cache(self):
-        self.app.log("开始构建模板缓存文件...")
+        self.log("开始构建模板缓存文件...")
         os.makedirs(CACHE_DIR, exist_ok=True)
 
         images_dir = self.get_images_root_dir()
         if not images_dir:
-            self.app.log("未找到 images 目录，无法构建模板缓存。")
+            self.log("未找到 images 目录，无法构建模板缓存。")
             return False
 
         cache_data = {}
@@ -174,20 +172,20 @@ class ImageCacheService:
             with open(TEMPLATE_META_FILE, "w", encoding="utf-8") as f:
                 json.dump(meta_data, f, ensure_ascii=False, indent=2)
 
-            self.app.log("模板缓存文件构建完成。")
+            self.log("模板缓存文件构建完成。")
             return True
         except Exception as e:
-            self.app.log(f"写入模板缓存失败: {e}")
+            self.log(f"写入模板缓存失败: {e}")
             return False
 
     def load_template_file_cache(self):
         try:
             with open(TEMPLATE_CACHE_FILE, "rb") as f:
                 self.file_template_cache = pickle.load(f)
-            self.app.log("模板缓存文件加载成功。")
+            self.log("模板缓存文件加载成功。")
             return True
         except Exception as e:
-            self.app.log(f"加载模板缓存失败: {e}")
+            self.log(f"加载模板缓存失败: {e}")
             self.file_template_cache = {}
             return False
 
@@ -198,7 +196,7 @@ class ImageCacheService:
             if self.load_template_file_cache():
                 return
 
-        self.app.log("模板缓存不存在或已失效，开始后台重建（这可能需要几秒钟）...")
+        self.log("模板缓存不存在或已失效，开始后台重建（这可能需要几秒钟）...")
         if self.build_template_file_cache():
             self.template_cache.clear()
             self.scaled_template_cache.clear()
@@ -209,7 +207,7 @@ class ImageCacheService:
         if region is not None:
             return region
         try:
-            return self.app.services.game_window.regions.get("全界面")
+            return self.game_window.regions.get("全界面")
         except Exception:
             return None
 
@@ -271,7 +269,7 @@ class ImageCacheService:
         return self.capture_frame(region, mask_areas=mask_areas).image
 
     def get_scales_to_try(self, fast_mode=True):
-        full_region = self.app.services.game_window.regions.get("全界面")
+        full_region = self.game_window.regions.get("全界面")
         curr_w = full_region[2] if full_region else pyautogui.size()[0]
         # 你的图主要是按 2560 截的，就优先围绕 2560 计算
         primary_base = 2560

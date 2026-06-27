@@ -3,20 +3,18 @@ from __future__ import annotations
 import ctypes
 import subprocess
 import time
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 import pyautogui
 import win32gui
 
-if TYPE_CHECKING:
-    from ..backend.app import BackendApp
-
 Region = tuple[int, int, int, int]
+LogFn = Callable[..., None]
 
 
 class GameWindowService:
-    def __init__(self, app: BackendApp) -> None:
-        self.app = app
+    def __init__(self, *, log: LogFn) -> None:
+        self.log = log
         self.regions: dict[str, Region] = {}
 
 
@@ -60,20 +58,20 @@ class GameWindowService:
             IMC_SETOPENSTATUS = 0x0006
             ctypes.windll.user32.SendMessageW(hwnd, WM_IME_CONTROL, IMC_SETOPENSTATUS, 0)
 
-            self.app.log("已自动切换英文键盘/关闭中文输入法状态。")
+            self.log("已自动切换英文键盘/关闭中文输入法状态。")
         except Exception as e:
-            self.app.log(f"自动防中文输入设置失败: {e}")
+            self.log(f"自动防中文输入设置失败: {e}")
 
 
     def check_and_focus_game(self):
-        self.app.log("检查游戏进程 (forzahorizon6.exe)...")
+        self.log("检查游戏进程 (forzahorizon6.exe)...")
         try:
             CREATE_NO_WINDOW = 0x08000000
             cmd = 'tasklist /FI "IMAGENAME eq forzahorizon6.exe" /NH /FO CSV'
             output = subprocess.check_output(cmd, shell=True, text=True, creationflags=CREATE_NO_WINDOW)
 
             if "forzahorizon6.exe" not in output.lower():
-                self.app.log("未发现 forzahorizon6.exe 进程！(请确保游戏已运行)")
+                self.log("未发现 forzahorizon6.exe 进程！(请确保游戏已运行)")
                 return False
 
             target_pid = None
@@ -84,7 +82,7 @@ class GameWindowService:
                     break
 
             if not target_pid:
-                self.app.log("找到进程但无法解析PID！")
+                self.log("找到进程但无法解析PID！")
                 return False
 
             hwnds = []
@@ -123,18 +121,18 @@ class GameWindowService:
                     # ====== 【核心修复】：拦截启动小窗/防作弊闪屏 ======
                     # 如果窗口宽度和高度太小，说明绝对不是正常的游戏主画面
                     if gw < 1000 or gh < 600:
-                        self.app.log(f"拦截到过小窗口 ({gw}x{gh})，判定为启动闪屏，等待主窗口加载...")
+                        self.log(f"拦截到过小窗口 ({gw}x{gh})，判定为启动闪屏，等待主窗口加载...")
                         return False
                     # ====================================================
                     self.update_regions_by_window(gx, gy, gw, gh)
                 except Exception as e:
-                    self.app.log(f"获取窗口坐标失败: {e}")
+                    self.log(f"获取窗口坐标失败: {e}")
 
                 time.sleep(1.0)
                 return True
 
         except Exception as e:
-            self.app.log(f"检查进程异常: {e}")
+            self.log(f"检查进程异常: {e}")
             return False
 
         return False

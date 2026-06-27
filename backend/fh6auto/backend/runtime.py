@@ -1,15 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import math
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pynput import keyboard
-
-if TYPE_CHECKING:
-    from .app import BackendApp
 
 STEP_LABELS = {
     "race": "循环跑图",
@@ -21,6 +19,7 @@ STEP_LABELS = {
 
 PIPELINE_STEPS = ("race", "buy", "mastery", "auto_wheelspin", "sell")
 DEFAULT_RACE_SKILL_POINTS = 50
+LogFn = Callable[..., None]
 
 
 class FlowCancelled(Exception):
@@ -48,12 +47,42 @@ class PipelineOptions:
 
 
 class BackendRuntimeService:
-    def __init__(self, app: BackendApp) -> None:
-        self.app = app
+    def __init__(
+        self,
+        *,
+        state,
+        config,
+        game_window,
+        input_actions,
+        log: LogFn,
+    ) -> None:
+        self.state = state
+        self.config = config
+        self.game_window = game_window
+        self.input_actions = input_actions
+        self.log = log
+        self.recovery = None
+        self.ocr = None
+        self.image_matcher = None
+        self.flows = None
+
+    def set_runtime_dependencies(self, *, recovery, ocr, image_matcher) -> None:
+        self.recovery = recovery
+        self.ocr = ocr
+        self.image_matcher = image_matcher
+
+    def set_flows(self, flows) -> None:
+        self.flows = flows
+
+    def _require_dependency(self, name: str):
+        dependency = getattr(self, name)
+        if dependency is None:
+            raise RuntimeError(f"Runtime dependency not bound: {name}")
+        return dependency
 
     def _int_config(self, key: str, default: int, minimum: int | None = None) -> int:
         try:
-            value = int(self.app.services.config.values.get(key, default))
+            value = int(self.config.values.get(key, default))
         except Exception:
             value = default
 
@@ -67,25 +96,25 @@ class BackendRuntimeService:
     def _read_pipeline_options(self) -> PipelineOptions:
         return PipelineOptions(
             race_count=self._int_config("race_count", 99, minimum=0),
-            race_until_skill_cap=bool(self.app.services.config.values.get("race_until_skill_cap", False)),
+            race_until_skill_cap=bool(self.config.values.get("race_until_skill_cap", False)),
             buy_count=self._int_config("buy_count", 30, minimum=0),
             mastery_count=self._int_config("mastery_count", 30, minimum=0),
-            mastery_use_all=bool(self.app.services.config.values.get("mastery_use_all", False)),
+            mastery_use_all=bool(self.config.values.get("mastery_use_all", False)),
             wheelspin_count=self._int_config("wheelspin_count", 30, minimum=0),
             normal_wheelspin_count=self._int_config("normal_wheelspin_count", 0, minimum=0),
-            wheelspin_use_all=bool(self.app.services.config.values.get("wheelspin_use_all", False)),
-            super_wheelspin_use_all=bool(self.app.services.config.values.get("super_wheelspin_use_all", False)),
-            normal_wheelspin_use_all=bool(self.app.services.config.values.get("normal_wheelspin_use_all", False)),
+            wheelspin_use_all=bool(self.config.values.get("wheelspin_use_all", False)),
+            super_wheelspin_use_all=bool(self.config.values.get("super_wheelspin_use_all", False)),
+            normal_wheelspin_use_all=bool(self.config.values.get("normal_wheelspin_use_all", False)),
             remove_car_count=self._int_config("sc_count", 30, minimum=0),
-            remove_car_use_all=bool(self.app.services.config.values.get("remove_car_use_all", False)),
+            remove_car_use_all=bool(self.config.values.get("remove_car_use_all", False)),
             total_loops=self._int_config("global_loops", 10, minimum=1),
-            infinite_loops=bool(self.app.services.config.values.get("global_loop_infinite", False)),
+            infinite_loops=bool(self.config.values.get("global_loop_infinite", False)),
             continue_steps=(
-                bool(self.app.services.config.values.get("chk_1", False)),
-                bool(self.app.services.config.values.get("chk_2", False)),
-                bool(self.app.services.config.values.get("chk_3", False)),
-                bool(self.app.services.config.values.get("chk_4", True)),
-                bool(self.app.services.config.values.get("chk_5", True)),
+                bool(self.config.values.get("chk_1", False)),
+                bool(self.config.values.get("chk_2", False)),
+                bool(self.config.values.get("chk_3", False)),
+                bool(self.config.values.get("chk_4", True)),
+                bool(self.config.values.get("chk_5", True)),
             ),
             next_steps=(
                 self._next_step_config("next_1", 2),
@@ -150,10 +179,10 @@ class BackendRuntimeService:
             "calc_d": str(sp_per_race),
         }
         if apply:
-            self.app.services.config.update(updates)
-            self.app.state.set_task("等待中", 0, 0)
+            self.config.update(updates)
+            self.state.set_task("等待中", 0, 0)
 
-        self.app.log(
+        self.log(
             f"计算完成：总计需 {total_cars} 车，共跑图 {total_races} 次；"
             f"分配为 {final_loops} 个大循环，每轮跑图 {final_races_per_loop} 次，动作 {cars_per_loop} 辆。"
         )
@@ -161,68 +190,71 @@ class BackendRuntimeService:
             "total_cars": total_cars,
             "total_races": total_races,
             "updates": updates,
-            "config": self.app.services.config.values.copy(),
+            "config": self.config.values.copy(),
         }
 
     def start_pipeline(self, start_step: str) -> bool:
-        if self.app.state.is_running:
+        if self.state.is_running:
             return False
         if start_step not in PIPELINE_STEPS:
             raise ValueError(f"Unknown pipeline step: {start_step}")
 
-        self.app.services.config.save()
-        self.app.services.input_actions.apply_input_backend(log_change=False)
+        self.config.save()
+        self.input_actions.apply_input_backend(log_change=False)
         options = self._read_pipeline_options()
         loop_total = 0 if options.infinite_loops else options.total_loops
 
-        self.app.state.reset_counters()
-        self.app.state.reset_progress()
-        self.app.state.set_loop(0, loop_total)
-        self.app.state.mark_started()
-        self.app.state.set_task("等待中", 0, 0)
-        self.app.state.set_task("初始化中...")
-        self.app.log(f"启动流程：{STEP_LABELS.get(start_step, start_step)}")
+        self.state.reset_counters()
+        self.state.reset_progress()
+        self.state.set_loop(0, loop_total)
+        self.state.mark_started()
+        self.state.set_task("等待中", 0, 0)
+        self.state.set_task("初始化中...")
+        self.log(f"启动流程：{STEP_LABELS.get(start_step, start_step)}")
 
-        self.app.state.current_thread = threading.Thread(
+        self.state.current_thread = threading.Thread(
             target=self._run_pipeline,
             args=(start_step, options),
             daemon=True,
         )
-        self.app.state.current_thread.start()
+        self.state.current_thread.start()
         return True
 
     def _run_pipeline(self, start_step: str, options: PipelineOptions) -> None:
         try:
-            if not self.app.services.game_window.check_and_focus_game():
+            flows = self._require_dependency("flows")
+            recovery = self._require_dependency("recovery")
+
+            if not self.game_window.check_and_focus_game():
                 return
 
             curr_idx = PIPELINE_STEPS.index(start_step)
             total_loops = options.total_loops
             loop_total = 0 if options.infinite_loops else total_loops
-            self.app.state.set_loop(1, loop_total)
+            self.state.set_loop(1, loop_total)
 
             continuous_failures = 0
             max_recoveries = 10
 
-            while self.app.state.is_running:
+            while self.state.is_running:
                 step_name = PIPELINE_STEPS[curr_idx]
                 success = False
 
                 try:
                     if step_name == "race":
-                        success = self.app.flows.race.logic_race(
+                        success = flows.race.logic_race(
                             options.race_count,
                             until_skill_cap=options.race_until_skill_cap,
                         )
                     elif step_name == "buy":
-                        success = self.app.flows.buy_car.logic_buy_car(options.buy_count)
+                        success = flows.buy_car.logic_buy_car(options.buy_count)
                     elif step_name == "mastery":
-                        success = self.app.flows.mastery.logic_mastery(
+                        success = flows.mastery.logic_mastery(
                             options.mastery_count,
                             use_all=options.mastery_use_all,
                         )
                     elif step_name == "auto_wheelspin":
-                        success = self.app.flows.auto_wheelspin.logic_auto_wheelspin(
+                        success = flows.auto_wheelspin.logic_auto_wheelspin(
                             options.wheelspin_count,
                             normal_count=options.normal_wheelspin_count,
                             use_all=options.wheelspin_use_all,
@@ -230,29 +262,29 @@ class BackendRuntimeService:
                             normal_use_all=options.normal_wheelspin_use_all,
                         )
                     elif step_name == "sell":
-                        success = self.app.flows.remove_car.find_and_remove_consumable_car(
+                        success = flows.remove_car.find_and_remove_consumable_car(
                             options.remove_car_count,
                             use_all=options.remove_car_use_all,
                         )
                 except FlowCancelled:
                     break
                 except Exception as e:
-                    self.app.log(f"执行模块 {STEP_LABELS.get(step_name, step_name)} 时异常: {e}")
+                    self.log(f"执行模块 {STEP_LABELS.get(step_name, step_name)} 时异常: {e}")
                     success = False
 
-                if not self.app.state.is_running:
+                if not self.state.is_running:
                     break
 
                 if not success:
                     continuous_failures += 1
                     if continuous_failures > max_recoveries:
-                        self.app.log(f"连续 {continuous_failures} 次恢复失败，已强制终止任务。")
+                        self.log(f"连续 {continuous_failures} 次恢复失败，已强制终止任务。")
                         break
 
-                    self.app.log(f"正在进行全局恢复 ({continuous_failures}/{max_recoveries})...")
-                    if self.app.services.recovery.attempt_recovery():
+                    self.log(f"正在进行全局恢复 ({continuous_failures}/{max_recoveries})...")
+                    if recovery.attempt_recovery():
                         continue
-                    self.app.log("致命错误：恢复失败，任务停止。")
+                    self.log("致命错误：恢复失败，任务停止。")
                     break
 
                 continuous_failures = 0
@@ -263,109 +295,114 @@ class BackendRuntimeService:
                     break
 
                 if next_idx <= curr_idx:
-                    self.app.state.set_loop(self.app.state.loop_current + 1, loop_total)
-                    completed_loop = max(1, self.app.state.loop_current - 1)
+                    self.state.set_loop(self.state.loop_current + 1, loop_total)
+                    completed_loop = max(1, self.state.loop_current - 1)
                     self.release_ocr_engine(f"大循环 {completed_loop} 结束")
 
-                    if not options.infinite_loops and self.app.state.loop_current > total_loops:
-                        self.app.log("达到设定的总循环次数，任务结束。")
+                    if not options.infinite_loops and self.state.loop_current > total_loops:
+                        self.log("达到设定的总循环次数，任务结束。")
                         break
 
                     loop_label = "∞" if options.infinite_loops else str(total_loops)
-                    self.app.log(f"开启新一轮大循环 ({self.app.state.loop_current}/{loop_label})")
-                    self.app.state.reset_counters()
-                    self.app.state.set_task("等待中", 0, 0)
+                    self.log(f"开启新一轮大循环 ({self.state.loop_current}/{loop_label})")
+                    self.state.reset_counters()
+                    self.state.set_task("等待中", 0, 0)
 
                 curr_idx = next_idx
         finally:
             self.stop_all(log_message="任务已停止，所有输入状态已重置。")
 
     def release_ocr_engine(self, reason: str = "", *, level: str = "debug") -> None:
+        ocr = self._require_dependency("ocr")
         try:
-            released = self.app.services.ocr.release()
+            released = ocr.release()
         except Exception as e:
-            self.app.log(f"释放 OCR 引擎失败: {e}", level="warning")
+            self.log(f"释放 OCR 引擎失败: {e}", level="warning")
             return
 
         if released:
             suffix = f"（{reason}）" if reason else ""
-            self.app.log(f"OCR 引擎已释放{suffix}，下次识别会重新初始化。", level=level)
+            self.log(f"OCR 引擎已释放{suffix}，下次识别会重新初始化。", level=level)
 
     def stop_all(self, log_message: str = "任务已停止，所有输入状态已重置。") -> None:
-        was_running = self.app.state.is_running
-        self.app.state.mark_idle()
+        was_running = self.state.is_running
+        self.state.mark_idle()
 
         try:
-            self.app.services.input_actions.release_all()
+            self.input_actions.release_all()
         except Exception:
             pass
 
         self.release_ocr_engine("任务停止")
 
         if was_running:
-            self.app.log(log_message)
+            self.log(log_message)
 
     def start_test_boot(self) -> bool:
-        if self.app.state.is_running:
-            self.app.log("已有任务正在运行，请先停止后再测试启动流程。")
+        recovery = self._require_dependency("recovery")
+
+        if self.state.is_running:
+            self.log("已有任务正在运行，请先停止后再测试启动流程。")
             return False
 
-        self.app.services.config.save()
-        self.app.state.reset_progress()
-        self.app.state.set_task("测试启动流程...")
-        self.app.state.mark_started()
-        self.app.log("====== 开始独立测试自动开机与识别流程 ======")
+        self.config.save()
+        self.state.reset_progress()
+        self.state.set_task("测试启动流程...")
+        self.state.mark_started()
+        self.log("====== 开始独立测试自动开机与识别流程 ======")
 
         def test_runner() -> None:
             try:
-                success = self.app.services.recovery.restart_game_and_boot(force_test=True)
+                success = recovery.restart_game_and_boot(force_test=True)
                 if success:
-                    self.app.log("测试结束：自动开机、状态机识别并到达菜单。")
+                    self.log("测试结束：自动开机、状态机识别并到达菜单。")
                 else:
-                    self.app.log("测试结束：自动开机流程失败，请检查截图或日志。")
+                    self.log("测试结束：自动开机流程失败，请检查截图或日志。")
             finally:
                 self.stop_all()
 
-        self.app.state.current_thread = threading.Thread(target=test_runner, daemon=True)
-        self.app.state.current_thread.start()
+        self.state.current_thread = threading.Thread(target=test_runner, daemon=True)
+        self.state.current_thread.start()
         return True
 
     def toggle_pause(self) -> bool:
-        if not self.app.state.is_running:
+        if not self.state.is_running:
             return False
 
-        self.app.state.mark_paused(not self.app.state.is_paused)
+        self.state.mark_paused(not self.state.is_paused)
 
-        if self.app.state.is_paused:
-            self.app.log("任务已暂停。")
+        if self.state.is_paused:
+            self.log("任务已暂停。")
             try:
-                self.app.services.input_actions.release_all()
+                self.input_actions.release_all()
             except Exception:
                 pass
         else:
-            self.app.log("任务已恢复。")
-        return self.app.state.is_paused
+            self.log("任务已恢复。")
+        return self.state.is_paused
 
     def check_pause(self) -> None:
-        while self.app.state.is_paused and self.app.state.is_running:
+        while self.state.is_paused and self.state.is_running:
             time.sleep(0.1)
 
     def debug(self) -> None:
-        is_running = self.app.state.is_running
-        self.app.state.is_running = True
+        image_matcher = self._require_dependency("image_matcher")
+
+        is_running = self.state.is_running
+        self.state.is_running = True
         time_start = time.time()
-        self.app.services.game_window.check_and_focus_game()
-        pos_el = self.app.services.image_matcher.find_image_sift(
+        self.game_window.check_and_focus_game()
+        pos_el = image_matcher.find_image_sift(
             "eventlab.png",
             min_inliers=12,
         )
         time_end = time.time()
-        self.app.state.is_running = is_running
-        self.app.log(f"Debug info: {pos_el}, Time taken: {time_end - time_start}", level="debug")
+        self.state.is_running = is_running
+        self.log(f"Debug info: {pos_el}, Time taken: {time_end - time_start}", level="debug")
 
     def ensure_running(self) -> None:
         self.check_pause()
-        if not self.app.state.is_running:
+        if not self.state.is_running:
             raise FlowCancelled()
 
     def sleep(self, duration: float, *, step: float = 0.05) -> None:
@@ -391,6 +428,6 @@ class BackendRuntimeService:
                 with keyboard.Listener(on_press=on_press) as listener:
                     listener.join()
             except Exception as e:
-                self.app.log(f"快捷键监听启动失败: {e}")
+                self.log(f"快捷键监听启动失败: {e}")
 
         threading.Thread(target=hotkey_thread, daemon=True).start()

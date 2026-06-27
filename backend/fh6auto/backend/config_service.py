@@ -1,36 +1,41 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
 from ..config import DEFAULT_CONFIG, load_config_file, save_config_file
 from ..paths import USER_CONFIG_FILE
 
-if TYPE_CHECKING:
-    from .app import BackendApp
+LogFn = Callable[..., None]
+ActionFn = Callable[[], None]
 
 
 class BackendConfigService:
-    def __init__(self, app: BackendApp) -> None:
-        self.app = app
+    def __init__(self, *, log: LogFn, apply_input_backend: ActionFn | None = None) -> None:
+        self.log = log
+        self.apply_input_backend = apply_input_backend or (lambda: None)
         self.values: dict[str, Any] = DEFAULT_CONFIG.copy()
+
+    def set_apply_input_backend(self, apply_input_backend: ActionFn) -> None:
+        self.apply_input_backend = apply_input_backend
 
     def load(self) -> None:
         self.values, loaded = load_config_file(USER_CONFIG_FILE)
         if not loaded:
-            self.app.log("用户 config.json 损坏，已自动恢复默认配置。")
+            self.log("用户 config.json 损坏，已自动恢复默认配置。")
 
     def save(self) -> None:
         try:
             save_config_file(USER_CONFIG_FILE, self.values)
         except Exception as e:
-            self.app.log(f"保存配置失败: {e}")
+            self.log(f"保存配置失败: {e}")
 
     def update(self, updates: dict[str, Any]) -> dict[str, Any]:
         normalized = self._normalize_updates(updates)
         self.values.update(normalized)
         self.save()
-        self.app.services.input_actions.apply_input_backend(log_change=False)
-        self.app.log("配置已保存。")
+        self.apply_input_backend()
+        self.log("配置已保存。")
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:

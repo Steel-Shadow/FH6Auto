@@ -4,15 +4,12 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
 
 from ..paths import get_img_path
-
-if TYPE_CHECKING:
-    from ..backend.app import BackendApp
 
 
 @dataclass(frozen=True)
@@ -44,118 +41,6 @@ class CarCardOcrCandidate:
     failed: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class CarCardSearchOptions:
-    card_path: str
-    label: str = "目标车辆"
-    required_tag_path: str | None = None
-    excluded_tag_path: str | None = None
-    required_tag_text: str | None = None
-    excluded_tag_text: str | None = None
-    exclude_driving: bool = False
-    region: tuple[int, int, int, int] | None = None
-    fast_mode: bool = True
-    candidate_threshold: float = 0.50
-    final_threshold: float = 0.78
-    title_threshold: float = 0.72
-    pi_threshold: float = 0.82
-    rarity_threshold: float = 0.68
-    body_threshold: float = 0.55
-    tag_threshold: float = 0.70
-    exclude_tag_threshold: float = 0.65
-    max_candidates: int = 80
-    mask_areas: Any = None
-    template_fallback: bool = False
-    start_page: int = 0
-    max_pages: int = 5
-    page_step_presses: int = 4
-    page_timeout: float = 1.5
-    interval: float = 0.2
-    turn_key: str = "right"
-    turn_key_delay: float = 0.06
-    turn_pause: float = 0.4
-
-
-@dataclass(frozen=True)
-class CarCardSearchResult:
-    position: tuple[int, int]
-    page_index: int
-
-
-class CarCardPageSelector:
-    def __init__(self, app: BackendApp) -> None:
-        self.app = app
-
-    def find(self, options: CarCardSearchOptions) -> CarCardSearchResult | None:
-        sleep = self.app.services.runtime.sleep
-        current_page = max(0, int(options.start_page))
-        max_pages = max(1, int(options.max_pages))
-
-        if current_page > 0:
-            self.app.log(f"从第 {current_page} 页开始扫描 {options.label}...", level="debug")
-            for _ in range(current_page):
-                self._turn_page(options)
-                sleep(0.15)
-
-        for page_offset in range(max_pages):
-            self.app.log(
-                f"扫描{options.label}... (连续未找到: {page_offset}/{max_pages})",
-                level="debug",
-            )
-            pos = self._find_on_current_page(options)
-            if pos:
-                self.app.log(f"锁定{options.label}，当前页码: {current_page}", level="debug")
-                return CarCardSearchResult(pos, current_page)
-
-            if page_offset >= max_pages - 1:
-                break
-
-            self.app.log(f"当前页面未找到{options.label}，向右翻页寻找... (第 {page_offset + 1} 次翻页)", level="debug")
-            self._turn_page(options)
-            sleep(options.turn_pause)
-            current_page += 1
-
-        return None
-
-    def _find_on_current_page(self, options: CarCardSearchOptions) -> tuple[int, int] | None:
-        deadline = time.monotonic() + max(0.0, options.page_timeout)
-        while True:
-            pos = self.app.services.image_matcher.find_car_card(
-                options.card_path,
-                required_tag_path=options.required_tag_path,
-                excluded_tag_path=options.excluded_tag_path,
-                required_tag_text=options.required_tag_text,
-                excluded_tag_text=options.excluded_tag_text,
-                exclude_driving=options.exclude_driving,
-                region=options.region,
-                fast_mode=options.fast_mode,
-                candidate_threshold=options.candidate_threshold,
-                final_threshold=options.final_threshold,
-                title_threshold=options.title_threshold,
-                pi_threshold=options.pi_threshold,
-                rarity_threshold=options.rarity_threshold,
-                body_threshold=options.body_threshold,
-                tag_threshold=options.tag_threshold,
-                exclude_tag_threshold=options.exclude_tag_threshold,
-                max_candidates=options.max_candidates,
-                mask_areas=options.mask_areas,
-                template_fallback=options.template_fallback,
-            )
-            if pos:
-                return pos
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return None
-            self.app.services.runtime.sleep(min(options.interval, remaining))
-
-    def _turn_page(self, options: CarCardSearchOptions) -> None:
-        sleep = self.app.services.runtime.sleep
-        for _ in range(max(1, int(options.page_step_presses))):
-            self.app.services.input_actions.hw_press(options.turn_key, delay=options.turn_key_delay)
-            sleep(0.1)
-
-
 class ImageMatcherService:
     """提供当前画面的图像目标匹配，复合目标可使用 OCR 结果作为特征。"""
 
@@ -164,8 +49,11 @@ class ImageMatcherService:
     PI_RE = re.compile(r"\b(X|S2|S1|A|B|C|D)\s*([0-9]{3})\b", re.IGNORECASE)
     YEAR_RE = re.compile(r"(19|20)\d{2}")
 
-    def __init__(self, app: BackendApp) -> None:
-        self.app = app
+    def __init__(self, *, state: Any, image_cache: Any, ocr: Any, log: Callable[..., None]) -> None:
+        self.state = state
+        self.image_cache = image_cache
+        self.ocr = ocr
+        self.log = log
         self.last_positions: dict[str, tuple[int, int]] = {}
         self.sift_feature_cache = {}
         self._tag_contour_cache: dict[str, tuple[np.ndarray, tuple[int, int, int, int]] | None] = {}
@@ -183,7 +71,7 @@ class ImageMatcherService:
                 parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
             else:
                 parts.append(f"{key}={value}")
-        self.app.log(f"[VisionTiming] Match.{name} " + " ".join(parts), level="debug")
+        self.log(f"[VisionTiming] Match.{name} " + " ".join(parts), level="debug")
 
     @staticmethod
     def _crop_ratio(img, x1, y1, x2, y2):
@@ -354,13 +242,13 @@ class ImageMatcherService:
         )
 
     def _ocr_texts_for_image(self, image_bgr) -> list[CardText]:
-        results = self.app.services.ocr.read(image_bgr, text_score=0.3)
+        results = self.ocr.read(image_bgr, text_score=0.3)
         texts: list[CardText] = []
         for result in results:
             center = self._box_center(result.box)
             if center is None:
                 continue
-            normalized = self.app.services.ocr.normalize_text(result.text)
+            normalized = self.ocr.normalize_text(result.text)
             if not normalized:
                 continue
             texts.append(
@@ -374,7 +262,7 @@ class ImageMatcherService:
         return texts
 
     def _read_car_card_spec_from_template(self, card_path) -> CarCardSpec | None:
-        template_orig, _ = self.app.services.image_cache.load_template(card_path)
+        template_orig, _ = self.image_cache.load_template(card_path)
         if template_orig is None:
             return None
 
@@ -387,7 +275,7 @@ class ImageMatcherService:
         if not tag_text:
             return None
         text = str(tag_text)
-        normalized = self.app.services.ocr.normalize_text(text)
+        normalized = self.ocr.normalize_text(text)
         if len(normalized) < 2 or "?" in normalized:
             return None
         return text
@@ -548,8 +436,8 @@ class ImageMatcherService:
             checks += 1
             if name in {"manufacturer", "class", "pi"}:
                 identity_checks += 1
-            expected_norm = self.app.services.ocr.normalize_text(expected)
-            actual_norm = self.app.services.ocr.normalize_text(actual or "")
+            expected_norm = self.ocr.normalize_text(expected)
+            actual_norm = self.ocr.normalize_text(actual or "")
             if actual_norm == expected_norm:
                 score += weight
             else:
@@ -563,8 +451,8 @@ class ImageMatcherService:
         if required_tag_text:
             checks += 1
             possible_score += 0.10
-            tag_norm = self.app.services.ocr.normalize_text(required_tag_text)
-            if tag_norm == self.app.services.ocr.normalize_text("全新"):
+            tag_norm = self.ocr.normalize_text(required_tag_text)
+            if tag_norm == self.ocr.normalize_text("全新"):
                 if candidate.is_new:
                     score += 0.10
                 else:
@@ -582,8 +470,8 @@ class ImageMatcherService:
                 failed.append("required_tag")
 
         if excluded_tag_text:
-            tag_norm = self.app.services.ocr.normalize_text(excluded_tag_text)
-            if tag_norm == self.app.services.ocr.normalize_text("全新") and candidate.is_new:
+            tag_norm = self.ocr.normalize_text(excluded_tag_text)
+            if tag_norm == self.ocr.normalize_text("全新") and candidate.is_new:
                 failed.append("excluded_tag")
         elif excluded_tag_contour_score is not None and excluded_tag_contour_score >= tag_threshold:
             failed.append("excluded_tag")
@@ -591,8 +479,8 @@ class ImageMatcherService:
         if target.title and candidate.title:
             possible_score += 0.06
             identity_checks += 1
-            target_title = self.app.services.ocr.normalize_text(target.title)
-            candidate_title = self.app.services.ocr.normalize_text(candidate.title)
+            target_title = self.ocr.normalize_text(target.title)
+            candidate_title = self.ocr.normalize_text(candidate.title)
             if (
                 len(target_title) >= 4
                 and len(candidate_title) >= 4
@@ -703,13 +591,13 @@ class ImageMatcherService:
             search_part = self._crop_ratio(roi, *(search_rect or template_rect))
 
             if mode == "gray":
-                tpl_part = self.app.services.image_cache.to_gray_image(tpl_part)
-                search_part = self.app.services.image_cache.to_gray_image(search_part)
+                tpl_part = self.image_cache.to_gray_image(tpl_part)
+                search_part = self.image_cache.to_gray_image(search_part)
             elif mode == "edge":
-                tpl_part = self.app.services.image_cache.to_edge_image(tpl_part)
-                search_part = self.app.services.image_cache.to_edge_image(search_part)
+                tpl_part = self.image_cache.to_edge_image(tpl_part)
+                search_part = self.image_cache.to_edge_image(search_part)
 
-            return self.app.services.image_cache.match_template_score(search_part, tpl_part)
+            return self.image_cache.match_template_score(search_part, tpl_part)
         except Exception:
             return 0.0
 
@@ -718,9 +606,9 @@ class ImageMatcherService:
             return 1.0
 
         best_score = 0.0
-        scales_to_try = scales if scales is not None else self.app.services.image_cache.get_scales_to_try(fast_mode=True)
+        scales_to_try = scales if scales is not None else self.image_cache.get_scales_to_try(fast_mode=True)
         for scale in scales_to_try:
-            score = self.app.services.image_cache.match_text_ui_score(roi, tag_path, scale)
+            score = self.image_cache.match_text_ui_score(roi, tag_path, scale)
             best_score = max(best_score, score)
             if best_score >= threshold:
                 return best_score
@@ -735,11 +623,11 @@ class ImageMatcherService:
         tag_threshold,
         tag_scales=None,
     ):
-        roi_gray = self.app.services.image_cache.to_gray_image(roi)
-        tpl_gray = self.app.services.image_cache.to_gray_image(template)
+        roi_gray = self.image_cache.to_gray_image(roi)
+        tpl_gray = self.image_cache.to_gray_image(template)
 
-        full_score = self.app.services.image_cache.match_template_score(roi, template)
-        gray_score = self.app.services.image_cache.match_template_score(roi_gray, tpl_gray)
+        full_score = self.image_cache.match_template_score(roi, template)
+        gray_score = self.image_cache.match_template_score(roi_gray, tpl_gray)
         title_score = self._match_region_score(
             roi,
             template,
@@ -990,7 +878,7 @@ class ImageMatcherService:
         mask_areas=None,
         template_fallback=False,
     ):
-        if not self.app.state.is_running:
+        if not self.state.is_running:
             return None
 
         started = time.perf_counter()
@@ -1004,11 +892,11 @@ class ImageMatcherService:
         method = "-"
         try:
             capture_started = time.perf_counter()
-            frame = self.app.services.image_cache.capture_frame(region, mask_areas=mask_areas)
+            frame = self.image_cache.capture_frame(region, mask_areas=mask_areas)
             capture_ms = self._elapsed_ms(capture_started)
             screen_bgr = frame.image
             candidates = []
-            template_orig, _ = self.app.services.image_cache.load_template(card_path)
+            template_orig, _ = self.image_cache.load_template(card_path)
             if template_orig is None:
                 result_text = "template_missing"
                 return None
@@ -1033,7 +921,7 @@ class ImageMatcherService:
                 pos = frame.to_screen_point(best_ocr.pos)
                 self.last_positions[card_path] = pos
                 spec = best_ocr.spec
-                self.app.log(
+                self.log(
                     f"[CarCardOCR] 锁定: {card_path} | 综合:{best_ocr.score:.3f} | "
                     f"车型:{spec.title or '-'} | 制造商:{spec.manufacturer or '-'} | 稀有度:{spec.rarity or '-'} | "
                     f"PI:{spec.car_class or '-'} {spec.pi or '-'} | 年份:{spec.year or '-'} | "
@@ -1045,7 +933,7 @@ class ImageMatcherService:
                 method = "ocr"
                 return pos
             if target_spec is not None:
-                # self.app.log(
+                # self.log(
                 #     f"[CarCardOCR] 未命中: {card_path} | 目标字段: "
                 #     f"车型={target_spec.title or '-'}, 制造商={target_spec.manufacturer or '-'}, "
                 #     f"稀有度={target_spec.rarity or '-'}, "
@@ -1122,7 +1010,7 @@ class ImageMatcherService:
                         failed.append("excluded_tag")
 
                     if "excluded_tag" in failed:
-                        self.app.log(
+                        self.log(
                             f"[CarCardMatch] 排除候选: {card_path} | 排除标签 {excluded_tag_path}: "
                             f"{scores['excluded_tag']:.3f}",
                             level="debug",
@@ -1136,9 +1024,9 @@ class ImageMatcherService:
 
             template_started = time.perf_counter()
             for scale in (
-                () if candidates or not template_fallback else self.app.services.image_cache.get_scales_to_try(fast_mode=fast_mode)
+                () if candidates or not template_fallback else self.image_cache.get_scales_to_try(fast_mode=fast_mode)
             ):
-                card_tpl, _ = self.app.services.image_cache.get_scaled_template(card_path, scale)
+                card_tpl, _ = self.image_cache.get_scaled_template(card_path, scale)
                 if card_tpl is None:
                     continue
 
@@ -1197,7 +1085,7 @@ class ImageMatcherService:
                         exclude_tag_threshold,
                     )
                     if "excluded_tag" in failed:
-                        self.app.log(
+                        self.log(
                             f"[CarCardMatch] 排除候选: {card_path} | 排除标签 {excluded_tag_path}: "
                             f"{scores['excluded_tag']:.3f}",
                             level="debug",
@@ -1232,7 +1120,7 @@ class ImageMatcherService:
             candidates_count = len(candidates)
             result_text = "hit"
             method = best.get("method", "template")
-            self.app.log(
+            self.log(
                 f"[CarCardMatch] 锁定: {card_path} | 方法:{best.get('method', 'template')} | 综合:{scores['final']:.3f} | "
                 f"标题:{scores['title']:.3f} | PI:{scores['pi']:.3f} | 稀有度:{scores['rarity']:.3f} | "
                 f"车身:{scores['body']:.3f} | 车辆:{scores.get('vehicle', 0.0):.3f} | "
@@ -1243,7 +1131,7 @@ class ImageMatcherService:
 
         except Exception as e:
             result_text = "error"
-            self.app.log(f"find_car_card 异常: {e}", level="warning")
+            self.log(f"find_car_card 异常: {e}", level="warning")
             return None
         finally:
             self._log_timing(
@@ -1264,7 +1152,7 @@ class ImageMatcherService:
         try:
             stat = os.stat(actual_path)
         except OSError:
-            self.app.log(f"SIFT 参考图不存在：{reference_path}", level="warning")
+            self.log(f"SIFT 参考图不存在：{reference_path}", level="warning")
             return None
 
         cache_key = ("sift", actual_path, stat.st_mtime, stat.st_size, int(max_features))
@@ -1273,18 +1161,18 @@ class ImageMatcherService:
 
         reference_gray = cv2.imread(actual_path, cv2.IMREAD_GRAYSCALE)
         if reference_gray is None:
-            self.app.log(f"SIFT 参考图读取失败：{reference_path}", level="warning")
+            self.log(f"SIFT 参考图读取失败：{reference_path}", level="warning")
             return None
 
         try:
             sift = cv2.SIFT_create(nfeatures=int(max_features))
         except Exception as e:
-            self.app.log(f"当前 OpenCV 不支持 SIFT：{e}", level="warning")
+            self.log(f"当前 OpenCV 不支持 SIFT：{e}", level="warning")
             return None
 
         keypoints, descriptors = sift.detectAndCompute(reference_gray, None)
         if descriptors is None or len(keypoints) < 4:
-            self.app.log(f"SIFT 参考图特征不足：{reference_path}", level="warning")
+            self.log(f"SIFT 参考图特征不足：{reference_path}", level="warning")
             return None
 
         data = (keypoints, descriptors, reference_gray.shape[:2], actual_path)
@@ -1368,7 +1256,7 @@ class ImageMatcherService:
         max_features=2500,
         ransac_reproj_threshold=5.0,
     ):
-        if not self.app.state.is_running:
+        if not self.state.is_running:
             return None
 
         started = time.perf_counter()
@@ -1380,7 +1268,7 @@ class ImageMatcherService:
         result_text = "miss"
         try:
             capture_started = time.perf_counter()
-            frame = self.app.services.image_cache.capture_frame(region)
+            frame = self.image_cache.capture_frame(region)
             capture_ms = self._elapsed_ms(capture_started)
             screen_bgr = frame.image
             screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
@@ -1419,7 +1307,7 @@ class ImageMatcherService:
 
             pos = frame.to_screen_point((center_x, center_y))
             self.last_positions[best["reference_path"]] = pos
-            self.app.log(
+            self.log(
                 f"[SIFTMatch] 命中: {best['reference_path']} | 内点: {best['inliers']}/{best['good']} "
                 f"(阈值 {min_inliers}) | 估算缩放: {best['scale']:.3f}",
                 level="debug",
@@ -1429,7 +1317,7 @@ class ImageMatcherService:
 
         except Exception as e:
             result_text = "error"
-            self.app.log(f"find_any_image_sift 异常: {e}", level="warning")
+            self.log(f"find_any_image_sift 异常: {e}", level="warning")
             return None
         finally:
             self._log_timing(
