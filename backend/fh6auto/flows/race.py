@@ -5,7 +5,6 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from ..input import DIK_CODES
 from ..vision.car_cards import CarCardPageSelector, CarCardSearchOptions
 
 
@@ -125,9 +124,8 @@ class RaceFlow:
 
         code_text = "".join(c for c in str(self.config.values.get("share_code", "")) if c.isdigit())
         for char in code_text:
-            if char in DIK_CODES:
-                self.input_actions.hw_press(char, delay=0.05)
-                sleep(0.05)
+            self.input_actions.hw_press(char, delay=0.05)
+            sleep(0.05)
 
         sleep(0.4)
         self.input_actions.hw_press("enter")
