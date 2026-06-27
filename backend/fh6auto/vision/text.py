@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import time
-from typing import Any
 
 import cv2
 import numpy as np
 
-from .cache import Box, Point
+from ..backend.state import RuntimeState
+from .cache import Box, ImageCacheService, Point
+from .ocr import OcrService
 
 
 @dataclass(slots=True)
@@ -24,7 +26,14 @@ class _TextMatch:
 class TextDetector:
     """基于 OCR 引擎定位当前 UI 中的通用文字和规则菜单文字。"""
 
-    def __init__(self, *, state: Any, image_cache: Any, ocr: Any, log) -> None:
+    def __init__(
+        self,
+        *,
+        state: RuntimeState,
+        image_cache: ImageCacheService,
+        ocr: OcrService,
+        log: Callable[..., None],
+    ) -> None:
         self.state = state
         self.image_cache = image_cache
         self.ocr = ocr

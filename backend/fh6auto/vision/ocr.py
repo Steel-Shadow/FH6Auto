@@ -7,10 +7,21 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 from rapidocr import EngineType, RapidOCR
+
+from ..automation.window import GameWindowService
+from ..backend.state import RuntimeState
+from .cache import ImageCacheService
+
+if TYPE_CHECKING:
+    from .footer import FooterDetector
+    from .manufacturer import ManufacturerDetector
+    from .player_stats import PlayerStatsDetector
+    from .text import TextDetector
 
 
 @dataclass(frozen=True)
@@ -23,13 +34,24 @@ class OcrText:
 class OcrService:
     """提供 OCR 引擎能力和旧入口兼容委托。"""
 
-    def __init__(self, *, state: Any, image_cache: Any, game_window: Any, log: Callable[..., None]) -> None:
+    def __init__(
+        self,
+        *,
+        state: RuntimeState,
+        image_cache: ImageCacheService,
+        game_window: GameWindowService,
+        log: Callable[..., None],
+    ) -> None:
         self.state = state
         self.image_cache = image_cache
         self.game_window = game_window
         self.log = log
+        self.text_detector: TextDetector | None = None
+        self.player_stats: PlayerStatsDetector | None = None
+        self.footer: FooterDetector | None = None
+        self.manufacturer: ManufacturerDetector | None = None
         self._providers: dict[str, list[str] | None] = {}
-        self._dll_handles: list[Any] = []
+        self._dll_handles: list[object] = []
         self._dll_dirs: set[str] = set()
         self._lock = threading.RLock()
         self._engine: RapidOCR | None = None
@@ -80,7 +102,7 @@ class OcrService:
                 pass
         return dll_dirs
 
-    def _ensure_engine(self):
+    def _ensure_engine(self) -> RapidOCR:
         with self._lock:
             if self._engine is not None:
                 return self._engine
@@ -238,7 +260,7 @@ class OcrService:
 
     def find_any_text_ui(self, text_list, region=None, threshold=0.65):
         """兼容旧入口；实际实现位于 TextDetector。"""
-        detector = getattr(self, "text_detector", None)
+        detector = self.text_detector
         if detector is None:
             self.log("find_any_text_ui 未绑定 TextDetector。", level="warning")
             return None
@@ -246,7 +268,7 @@ class OcrService:
 
     def find_sell_price_value(self, region=None, threshold=0.25) -> int | None:
         """兼容旧入口；实际实现位于 PlayerStatsDetector。"""
-        detector = getattr(self, "player_stats", None)
+        detector = self.player_stats
         if detector is None:
             self.log("find_sell_price_value 未绑定 PlayerStatsDetector。", level="warning")
             return None
@@ -254,7 +276,7 @@ class OcrService:
 
     def find_current_credit_value(self, region=None, threshold=0.25) -> int | None:
         """兼容旧入口；实际实现位于 PlayerStatsDetector。"""
-        detector = getattr(self, "player_stats", None)
+        detector = self.player_stats
         if detector is None:
             self.log("find_current_credit_value 未绑定 PlayerStatsDetector。", level="warning")
             return None
@@ -262,7 +284,7 @@ class OcrService:
 
     def find_current_skill_points_value(self, region=None, threshold=0.25) -> int | None:
         """兼容旧入口；实际实现位于 PlayerStatsDetector。"""
-        detector = getattr(self, "player_stats", None)
+        detector = self.player_stats
         if detector is None:
             self.log("find_current_skill_points_value 未绑定 PlayerStatsDetector。", level="warning")
             return None
@@ -270,7 +292,7 @@ class OcrService:
 
     def find_menu_text_ui(self, target_text, region=None, threshold=0.65):
         """兼容旧入口；实际实现位于 TextDetector。"""
-        detector = getattr(self, "text_detector", None)
+        detector = self.text_detector
         if detector is None:
             self.log("find_menu_text_ui 未绑定 TextDetector。", level="warning")
             return None
@@ -278,7 +300,7 @@ class OcrService:
 
     def find_footer_text_ui(self, target_text, region=None, threshold=0.65):
         """兼容旧入口；实际实现位于 FooterDetector。"""
-        detector = getattr(self, "footer", None)
+        detector = self.footer
         if detector is None:
             self.log("find_footer_text_ui 未绑定 FooterDetector。", level="warning")
             return None
@@ -286,7 +308,7 @@ class OcrService:
 
     def find_manufacturer_text(self, target_text, region=None, threshold=0.75):
         """兼容旧入口；实际实现位于 ManufacturerDetector。"""
-        detector = getattr(self, "manufacturer", None)
+        detector = self.manufacturer
         if detector is None:
             self.log("find_manufacturer_text 未绑定 ManufacturerDetector。", level="warning")
             return None
@@ -294,7 +316,7 @@ class OcrService:
 
     def _find_manufacturer_cells(self, screen_bgr):
         """兼容旧调试入口；实际实现位于 ManufacturerDetector。"""
-        detector = getattr(self, "manufacturer", None)
+        detector = self.manufacturer
         if detector is None:
             return []
         return detector.find_cells(screen_bgr)

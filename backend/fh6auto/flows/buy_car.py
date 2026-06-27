@@ -1,21 +1,29 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+
+from ..automation.recovery import RecoveryService
+from ..backend.config_service import BackendConfigService
+from ..backend.state import RuntimeState
+from ..input.actions import InputActionsService
+from ..vision.manufacturer import ManufacturerDetector
+from ..vision.matcher import ImageMatcherService
+from ..vision.player_stats import PlayerStatsDetector
+from ..vision.polling import ImageWaitsService
 
 
 class BuyCarFlow:
     def __init__(
         self,
         *,
-        state: Any,
-        config: Any,
-        recovery: Any,
-        input_actions: Any,
-        image_waits: Any,
-        image_matcher: Any,
-        manufacturer: Any,
-        player_stats: Any,
+        state: RuntimeState,
+        config: BackendConfigService,
+        recovery: RecoveryService,
+        input_actions: InputActionsService,
+        image_waits: ImageWaitsService,
+        image_matcher: ImageMatcherService,
+        manufacturer: ManufacturerDetector,
+        player_stats: PlayerStatsDetector,
         sleep: Callable[[float], None],
         log: Callable[..., None],
     ) -> None:

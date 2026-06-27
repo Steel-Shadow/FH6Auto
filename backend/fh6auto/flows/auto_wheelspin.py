@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any
+
+from ..automation.recovery import RecoveryService
+from ..automation.window import GameWindowService
+from ..backend.config_service import BackendConfigService
+from ..backend.runtime import BackendRuntimeService
+from ..backend.state import RuntimeState
+from ..input.actions import InputActionsService
+from ..vision.cache import ImageCacheService
+from ..vision.matcher import ImageMatcherService
+from ..vision.ocr import OcrService
+from ..vision.player_stats import PlayerStatsDetector
 
 NORMAL_WHEELSPIN_REFERENCE = "wheelspin.png"
 SUPER_WHEELSPIN_REFERENCE = "superwheelspin.png"
@@ -17,16 +27,16 @@ class AutoWheelspinFlow:
     def __init__(
         self,
         *,
-        state: Any,
-        config: Any,
-        game_window: Any,
-        image_cache: Any,
-        image_matcher: Any,
-        input_actions: Any,
-        ocr: Any,
-        player_stats: Any,
-        recovery: Any,
-        runtime: Any,
+        state: RuntimeState,
+        config: BackendConfigService,
+        game_window: GameWindowService,
+        image_cache: ImageCacheService,
+        image_matcher: ImageMatcherService,
+        input_actions: InputActionsService,
+        ocr: OcrService,
+        player_stats: PlayerStatsDetector,
+        recovery: RecoveryService,
+        runtime: BackendRuntimeService,
         log: Callable[..., None],
     ) -> None:
         self.state = state

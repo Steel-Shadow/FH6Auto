@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import time
-from typing import Any
+
+from ..input.actions import InputActionsService
+from .matcher import ImageMatcherService
+
+MaskArea = tuple[int, int, int, int]
 
 
 @dataclass(frozen=True)
@@ -26,7 +30,7 @@ class CarCardSearchOptions:
     tag_threshold: float = 0.70
     exclude_tag_threshold: float = 0.65
     max_candidates: int = 80
-    mask_areas: Any = None
+    mask_areas: Sequence[MaskArea] | None = None
     start_page: int = 0
     max_pages: int = 5
     page_step_presses: int = 4
@@ -49,8 +53,8 @@ class CarCardPageSelector:
     def __init__(
         self,
         *,
-        image_matcher: Any,
-        input_actions: Any,
+        image_matcher: ImageMatcherService,
+        input_actions: InputActionsService,
         sleep: Callable[[float], None],
         log: Callable[..., None],
     ) -> None:

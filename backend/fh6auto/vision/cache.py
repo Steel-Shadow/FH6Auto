@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from collections.abc import Callable
 
 import cv2
 import numpy as np
 import pyautogui
 from PIL import ImageGrab
 
+from ..automation.window import GameWindowService
 from ..paths import get_img_path
 
 Point = tuple[int, int]
@@ -51,7 +52,7 @@ class CaptureFrame:
 
 
 class ImageCacheService:
-    def __init__(self, *, game_window: Any, log: Callable[[str], None]) -> None:
+    def __init__(self, *, game_window: GameWindowService, log: Callable[..., None]) -> None:
         self.game_window = game_window
         self.log = log
         self.image_cache = {}

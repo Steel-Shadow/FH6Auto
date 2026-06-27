@@ -5,9 +5,20 @@ from dataclasses import dataclass
 import math
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pynput import keyboard
+
+from .config_service import BackendConfigService
+from .state import RuntimeState
+from ..automation.window import GameWindowService
+from ..input.actions import InputActionsService
+
+if TYPE_CHECKING:
+    from .app import AppFlows
+    from ..automation.recovery import RecoveryService
+    from ..vision.matcher import ImageMatcherService
+    from ..vision.ocr import OcrService
 
 STEP_LABELS = {
     "race": "循环跑图",
@@ -50,10 +61,10 @@ class BackendRuntimeService:
     def __init__(
         self,
         *,
-        state,
-        config,
-        game_window,
-        input_actions,
+        state: RuntimeState,
+        config: BackendConfigService,
+        game_window: GameWindowService,
+        input_actions: InputActionsService,
         log: LogFn,
     ) -> None:
         self.state = state
@@ -61,24 +72,44 @@ class BackendRuntimeService:
         self.game_window = game_window
         self.input_actions = input_actions
         self.log = log
-        self.recovery = None
-        self.ocr = None
-        self.image_matcher = None
-        self.flows = None
+        self.recovery: RecoveryService | None = None
+        self.ocr: OcrService | None = None
+        self.image_matcher: ImageMatcherService | None = None
+        self.flows: AppFlows | None = None
 
-    def set_runtime_dependencies(self, *, recovery, ocr, image_matcher) -> None:
+    def set_runtime_dependencies(
+        self,
+        *,
+        recovery: RecoveryService,
+        ocr: OcrService,
+        image_matcher: ImageMatcherService,
+    ) -> None:
         self.recovery = recovery
         self.ocr = ocr
         self.image_matcher = image_matcher
 
-    def set_flows(self, flows) -> None:
+    def set_flows(self, flows: AppFlows) -> None:
         self.flows = flows
 
-    def _require_dependency(self, name: str):
-        dependency = getattr(self, name)
-        if dependency is None:
-            raise RuntimeError(f"Runtime dependency not bound: {name}")
-        return dependency
+    def _get_recovery(self) -> RecoveryService:
+        if self.recovery is None:
+            raise RuntimeError("Runtime dependency not bound: recovery")
+        return self.recovery
+
+    def _get_ocr(self) -> OcrService:
+        if self.ocr is None:
+            raise RuntimeError("Runtime dependency not bound: ocr")
+        return self.ocr
+
+    def _get_image_matcher(self) -> ImageMatcherService:
+        if self.image_matcher is None:
+            raise RuntimeError("Runtime dependency not bound: image_matcher")
+        return self.image_matcher
+
+    def _get_flows(self) -> AppFlows:
+        if self.flows is None:
+            raise RuntimeError("Runtime dependency not bound: flows")
+        return self.flows
 
     def _int_config(self, key: str, default: int, minimum: int | None = None) -> int:
         try:
@@ -222,8 +253,8 @@ class BackendRuntimeService:
 
     def _run_pipeline(self, start_step: str, options: PipelineOptions) -> None:
         try:
-            flows = self._require_dependency("flows")
-            recovery = self._require_dependency("recovery")
+            flows = self._get_flows()
+            recovery = self._get_recovery()
 
             if not self.game_window.check_and_focus_game():
                 return
@@ -313,7 +344,7 @@ class BackendRuntimeService:
             self.stop_all(log_message="任务已停止，所有输入状态已重置。")
 
     def release_ocr_engine(self, reason: str = "", *, level: str = "debug") -> None:
-        ocr = self._require_dependency("ocr")
+        ocr = self._get_ocr()
         try:
             released = ocr.release()
         except Exception as e:
@@ -339,7 +370,7 @@ class BackendRuntimeService:
             self.log(log_message)
 
     def start_test_boot(self) -> bool:
-        recovery = self._require_dependency("recovery")
+        recovery = self._get_recovery()
 
         if self.state.is_running:
             self.log("已有任务正在运行，请先停止后再测试启动流程。")
@@ -386,7 +417,7 @@ class BackendRuntimeService:
             time.sleep(0.1)
 
     def debug(self) -> None:
-        image_matcher = self._require_dependency("image_matcher")
+        image_matcher = self._get_image_matcher()
 
         is_running = self.state.is_running
         self.state.is_running = True

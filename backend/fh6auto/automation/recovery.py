@@ -4,6 +4,14 @@ import os
 import time
 from collections.abc import Callable
 
+from ..backend.config_service import BackendConfigService
+from ..backend.state import RuntimeState
+from ..input.actions import InputActionsService
+from ..vision.matcher import ImageMatcherService
+from ..vision.ocr import OcrService
+from ..vision.text import TextDetector
+from .window import GameWindowService
+
 LogFn = Callable[..., None]
 ActionFn = Callable[[], None]
 
@@ -12,13 +20,13 @@ class RecoveryService:
     def __init__(
         self,
         *,
-        state,
-        config,
-        game_window,
-        image_matcher,
-        ocr,
-        text_detector,
-        input_actions,
+        state: RuntimeState,
+        config: BackendConfigService,
+        game_window: GameWindowService,
+        image_matcher: ImageMatcherService,
+        ocr: OcrService,
+        text_detector: TextDetector,
+        input_actions: InputActionsService,
         check_pause: ActionFn,
         log: LogFn,
     ) -> None:

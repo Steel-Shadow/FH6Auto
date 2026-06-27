@@ -3,13 +3,16 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
 
 import cv2
 import numpy as np
 
+from ..backend.state import RuntimeState
 from ..paths import get_img_path
+from .cache import ImageCacheService
+from .ocr import OcrService
 
 
 @dataclass(frozen=True)
@@ -49,7 +52,14 @@ class ImageMatcherService:
     PI_RE = re.compile(r"\b(X|S2|S1|A|B|C|D)\s*([0-9]{3})\b", re.IGNORECASE)
     YEAR_RE = re.compile(r"(19|20)\d{2}")
 
-    def __init__(self, *, state: Any, image_cache: Any, ocr: Any, log: Callable[..., None]) -> None:
+    def __init__(
+        self,
+        *,
+        state: RuntimeState,
+        image_cache: ImageCacheService,
+        ocr: OcrService,
+        log: Callable[..., None],
+    ) -> None:
         self.state = state
         self.image_cache = image_cache
         self.ocr = ocr

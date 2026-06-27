@@ -1,8 +1,16 @@
 from __future__ import annotations
 from collections.abc import Callable
-from typing import Any
 
+from ..automation.recovery import RecoveryService
+from ..automation.window import GameWindowService
+from ..backend.config_service import BackendConfigService
+from ..backend.state import RuntimeState
+from ..input.actions import InputActionsService
 from ..vision.car_cards import CarCardPageSelector, CarCardSearchOptions
+from ..vision.manufacturer import ManufacturerDetector
+from ..vision.matcher import ImageMatcherService
+from ..vision.player_stats import PlayerStatsDetector
+from ..vision.polling import ImageWaitsService
 
 
 class MasteryFlow:
@@ -11,15 +19,15 @@ class MasteryFlow:
     def __init__(
         self,
         *,
-        state: Any,
-        config: Any,
-        game_window: Any,
-        input_actions: Any,
-        image_matcher: Any,
-        image_waits: Any,
-        manufacturer: Any,
-        player_stats: Any,
-        recovery: Any,
+        state: RuntimeState,
+        config: BackendConfigService,
+        game_window: GameWindowService,
+        input_actions: InputActionsService,
+        image_matcher: ImageMatcherService,
+        image_waits: ImageWaitsService,
+        manufacturer: ManufacturerDetector,
+        player_stats: PlayerStatsDetector,
+        recovery: RecoveryService,
         sleep: Callable[[float], None],
         log: Callable[..., None],
     ) -> None:

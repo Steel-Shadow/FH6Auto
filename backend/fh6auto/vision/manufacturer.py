@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any
 
 import cv2
 import numpy as np
 
+from ..backend.config_service import BackendConfigService
+from ..backend.state import RuntimeState
+from ..input.actions import InputActionsService
+from .cache import ImageCacheService
+from .ocr import OcrService
 from .polling import PollingWaiter
 
 Box = tuple[int, int, int, int]
@@ -18,11 +22,11 @@ class ManufacturerDetector:
     def __init__(
         self,
         *,
-        state: Any,
-        image_cache: Any,
-        ocr: Any,
-        input_actions: Any,
-        config: Any,
+        state: RuntimeState,
+        image_cache: ImageCacheService,
+        ocr: OcrService,
+        input_actions: InputActionsService,
+        config: BackendConfigService,
         log: Callable[..., None],
     ) -> None:
         self.state = state

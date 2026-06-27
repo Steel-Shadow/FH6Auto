@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
+from ..backend.state import RuntimeState
+
+if TYPE_CHECKING:
+    from .footer import FooterDetector
+    from .manufacturer import ManufacturerDetector
+    from .matcher import ImageMatcherService
+    from .ocr import OcrService
+    from .text import TextDetector
 
 T = TypeVar("T")
 
@@ -43,12 +51,12 @@ class ImageWaitsService:
     def __init__(
         self,
         *,
-        state: Any,
-        image_matcher: Any,
-        ocr: Any,
-        text_detector: Any,
-        footer: Any,
-        manufacturer: Any,
+        state: RuntimeState,
+        image_matcher: ImageMatcherService,
+        ocr: OcrService,
+        text_detector: TextDetector,
+        footer: FooterDetector,
+        manufacturer: ManufacturerDetector,
     ) -> None:
         self.state = state
         self.image_matcher = image_matcher

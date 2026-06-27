@@ -3,9 +3,12 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
+from ..automation.window import GameWindowService
+from ..backend.state import RuntimeState
 from .cache import Box, Point
+from .cache import ImageCacheService
+from .ocr import OcrService
 
 
 @dataclass(frozen=True)
@@ -24,10 +27,10 @@ class FooterDetector:
     def __init__(
         self,
         *,
-        state: Any,
-        image_cache: Any,
-        game_window: Any,
-        ocr: Any,
+        state: RuntimeState,
+        image_cache: ImageCacheService,
+        game_window: GameWindowService,
+        ocr: OcrService,
         log: Callable[..., None],
     ) -> None:
         self.state = state

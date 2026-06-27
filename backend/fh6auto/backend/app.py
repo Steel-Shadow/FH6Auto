@@ -7,13 +7,14 @@ from collections.abc import Callable
 
 from ..paths import LOG_FILE, auto_extract_images
 from .state import RuntimeState
-from ..automation import GameWindowService, RecoveryService
+from ..automation.recovery import RecoveryService
+from ..automation.window import GameWindowService
 from ..flows.auto_wheelspin import AutoWheelspinFlow
 from ..flows.buy_car import BuyCarFlow
 from ..flows.mastery import MasteryFlow
 from ..flows.race import RaceFlow
 from ..flows.remove_car import RemoveCarFlow
-from ..input import InputActionsService
+from ..input.actions import InputActionsService
 from ..vision import (
     ImageCacheService,
     FooterDetector,
@@ -89,16 +90,16 @@ LogFn = Callable[..., None]
 
 
 class AppServices:
-    def __init__(self, *, state, log: LogFn) -> None:
-        self.config = BackendConfigService(log=log)
-        self.game_window = GameWindowService(log=log)
-        self.input_actions = InputActionsService(
+    def __init__(self, *, state: RuntimeState, log: LogFn) -> None:
+        self.config: BackendConfigService = BackendConfigService(log=log)
+        self.game_window: GameWindowService = GameWindowService(log=log)
+        self.input_actions: InputActionsService = InputActionsService(
             get_game_region=lambda: self.game_window.regions["全界面"],
             save_config=self.config.save,
             log=log,
         )
         self.config.set_apply_input_backend(lambda: self.input_actions.apply_input_backend(log_change=False))
-        self.runtime = BackendRuntimeService(
+        self.runtime: BackendRuntimeService = BackendRuntimeService(
             state=state,
             config=self.config,
             game_window=self.game_window,
@@ -106,27 +107,27 @@ class AppServices:
             log=log,
         )
         self.input_actions.set_ensure_running(self.runtime.ensure_running)
-        self.image_cache = ImageCacheService(game_window=self.game_window, log=log)
-        self.ocr = OcrService(
+        self.image_cache: ImageCacheService = ImageCacheService(game_window=self.game_window, log=log)
+        self.ocr: OcrService = OcrService(
             state=state,
             image_cache=self.image_cache,
             game_window=self.game_window,
             log=log,
         )
-        self.image_matcher = ImageMatcherService(
+        self.image_matcher: ImageMatcherService = ImageMatcherService(
             state=state,
             image_cache=self.image_cache,
             ocr=self.ocr,
             log=log,
         )
-        self.text = TextDetector(
+        self.text: TextDetector = TextDetector(
             state=state,
             image_cache=self.image_cache,
             ocr=self.ocr,
             log=log,
         )
         self.ocr.text_detector = self.text
-        self.recovery = RecoveryService(
+        self.recovery: RecoveryService = RecoveryService(
             state=state,
             config=self.config,
             game_window=self.game_window,
@@ -142,7 +143,7 @@ class AppServices:
             ocr=self.ocr,
             image_matcher=self.image_matcher,
         )
-        self.manufacturer = ManufacturerDetector(
+        self.manufacturer: ManufacturerDetector = ManufacturerDetector(
             state=state,
             image_cache=self.image_cache,
             ocr=self.ocr,
@@ -151,7 +152,7 @@ class AppServices:
             log=log,
         )
         self.ocr.manufacturer = self.manufacturer
-        self.player_stats = PlayerStatsDetector(
+        self.player_stats: PlayerStatsDetector = PlayerStatsDetector(
             state=state,
             image_cache=self.image_cache,
             game_window=self.game_window,
@@ -159,7 +160,7 @@ class AppServices:
             log=log,
         )
         self.ocr.player_stats = self.player_stats
-        self.footer = FooterDetector(
+        self.footer: FooterDetector = FooterDetector(
             state=state,
             image_cache=self.image_cache,
             game_window=self.game_window,
@@ -167,7 +168,7 @@ class AppServices:
             log=log,
         )
         self.ocr.footer = self.footer
-        self.image_waits = ImageWaitsService(
+        self.image_waits: ImageWaitsService = ImageWaitsService(
             state=state,
             image_matcher=self.image_matcher,
             ocr=self.ocr,
@@ -178,8 +179,8 @@ class AppServices:
 
 
 class AppFlows:
-    def __init__(self, *, state, services: Any, log: LogFn) -> None:
-        self.race = RaceFlow(
+    def __init__(self, *, state: RuntimeState, services: AppServices, log: LogFn) -> None:
+        self.race: RaceFlow = RaceFlow(
             state=state,
             config=services.config,
             game_window=services.game_window,
@@ -194,7 +195,7 @@ class AppFlows:
             sleep=services.runtime.sleep,
             log=log,
         )
-        self.buy_car = BuyCarFlow(
+        self.buy_car: BuyCarFlow = BuyCarFlow(
             state=state,
             config=services.config,
             recovery=services.recovery,
@@ -206,7 +207,7 @@ class AppFlows:
             sleep=services.runtime.sleep,
             log=log,
         )
-        self.mastery = MasteryFlow(
+        self.mastery: MasteryFlow = MasteryFlow(
             state=state,
             config=services.config,
             game_window=services.game_window,
@@ -219,7 +220,7 @@ class AppFlows:
             sleep=services.runtime.sleep,
             log=log,
         )
-        self.auto_wheelspin = AutoWheelspinFlow(
+        self.auto_wheelspin: AutoWheelspinFlow = AutoWheelspinFlow(
             state=state,
             config=services.config,
             game_window=services.game_window,
@@ -232,7 +233,7 @@ class AppFlows:
             runtime=services.runtime,
             log=log,
         )
-        self.remove_car = RemoveCarFlow(
+        self.remove_car: RemoveCarFlow = RemoveCarFlow(
             state=state,
             game_window=services.game_window,
             input_actions=services.input_actions,
