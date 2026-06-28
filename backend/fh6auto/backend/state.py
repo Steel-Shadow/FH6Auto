@@ -144,7 +144,7 @@ class RuntimeState:
                     "buy": self.car_counter,
                     "mastery": self.mastery_counter,
                     "auto_wheelspin": self.wheelspin_counter,
-                    "sell": self.sc_count,
+                    "removed_cars": self.sc_count,
                 },
                 "elapsed_seconds": elapsed,
                 "logs": list(self._logs),

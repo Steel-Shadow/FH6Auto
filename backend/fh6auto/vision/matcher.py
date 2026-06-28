@@ -46,6 +46,14 @@ class CarCardOcrCandidate:
     failed: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class CarCardActionMatch:
+    action: str
+    position: tuple[int, int]
+    spec: CarCardSpec
+    score: float
+
+
 class ImageMatcherService(VisionTimingMixin):
     """提供当前画面的图像目标匹配，复合目标可使用 OCR 结果作为特征。"""
 
@@ -669,6 +677,153 @@ class ImageMatcherService(VisionTimingMixin):
                 )
 
         return None
+
+    def _find_first_consumable_car_card_action_candidate(
+        self,
+        screen_bgr,
+        *,
+        mastery_target: CarCardSpec,
+        remove_target: CarCardSpec,
+        min_score=0.75,
+        tag_threshold=0.55,
+    ) -> tuple[str, CarCardOcrCandidate] | None:
+        boxes = self._segment_car_card_boxes(screen_bgr)
+        if not boxes:
+            return None
+
+        required_new_text = self._normalize_tag_text("全新")
+        excluded_new_text = self._normalize_tag_text("全新")
+
+        for x, y, w, h in boxes:
+            roi = screen_bgr[y : y + h, x : x + w]
+            card_texts = tuple(self._ocr_texts_for_image(roi))
+            if not card_texts:
+                continue
+
+            spec = self._parse_car_card_spec(card_texts)
+            mastery_score, mastery_failed = self._score_car_card_ocr_candidate(
+                mastery_target,
+                spec,
+                required_new_text,
+                None,
+                tag_threshold=tag_threshold,
+            )
+            if mastery_score >= min_score and not mastery_failed:
+                return (
+                    "mastery",
+                    CarCardOcrCandidate(
+                        box=(x, y, w, h),
+                        pos=(int(x + w // 2), int(y + h // 2)),
+                        spec=spec,
+                        texts=card_texts,
+                        score=mastery_score,
+                        failed=mastery_failed,
+                    ),
+                )
+
+            if self._has_driving_badge(roi):
+                continue
+
+            remove_score, remove_failed = self._score_car_card_ocr_candidate(
+                remove_target,
+                spec,
+                None,
+                excluded_new_text,
+                tag_threshold=tag_threshold,
+            )
+            if remove_score >= min_score and not remove_failed:
+                return (
+                    "remove",
+                    CarCardOcrCandidate(
+                        box=(x, y, w, h),
+                        pos=(int(x + w // 2), int(y + h // 2)),
+                        spec=spec,
+                        texts=card_texts,
+                        score=remove_score,
+                        failed=remove_failed,
+                    ),
+                )
+
+        return None
+
+    def find_consumable_car_card_action(
+        self,
+        *,
+        mastery_card_path="newCC.png",
+        remove_card_path="removecarobject.png",
+        region=None,
+        final_threshold=0.78,
+        tag_threshold=0.70,
+        mask_areas=None,
+    ) -> CarCardActionMatch | None:
+        if not self.state.is_running:
+            return None
+
+        started = time.perf_counter()
+        capture_ms = None
+        ocr_ms = None
+        result_text = "miss"
+        action = "-"
+        try:
+            capture_started = time.perf_counter()
+            frame = self.image_cache.capture_frame(region, mask_areas=mask_areas)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
+
+            mastery_target = self._read_car_card_spec_from_template(mastery_card_path)
+            remove_target = self._read_car_card_spec_from_template(remove_card_path)
+            if mastery_target is None or remove_target is None:
+                result_text = "target_spec_missing"
+                self.log(
+                    f"[CarCardOCR] 无法读取合并车辆目标字段: mastery={mastery_card_path}, remove={remove_card_path}",
+                    level="debug",
+                )
+                return None
+
+            ocr_started = time.perf_counter()
+            result = self._find_first_consumable_car_card_action_candidate(
+                screen_bgr,
+                mastery_target=mastery_target,
+                remove_target=remove_target,
+                min_score=max(0.75, min(float(final_threshold), 0.85)),
+                tag_threshold=min(float(tag_threshold), 0.55),
+            )
+            ocr_ms = self._elapsed_ms(ocr_started)
+            if result is None:
+                result_text = "ocr_miss"
+                return None
+
+            action, candidate = result
+            position = frame.to_screen_point(candidate.pos)
+            spec = candidate.spec
+            self.log(
+                f"[CarCardOCR] 合并锁定: {action} | 综合:{candidate.score:.3f} | "
+                f"车型:{spec.title or '-'} | 制造商:{spec.manufacturer or '-'} | 稀有度:{spec.rarity or '-'} | "
+                f"PI:{spec.car_class or '-'} {spec.pi or '-'} | 年份:{spec.year or '-'} | "
+                f"全新:{'是' if spec.is_new else '否'}",
+                level="debug",
+            )
+            result_text = "hit"
+            return CarCardActionMatch(
+                action=action,
+                position=position,
+                spec=spec,
+                score=candidate.score,
+            )
+
+        except Exception as e:
+            result_text = "error"
+            self.log(f"find_consumable_car_card_action 异常: {e}", level="warning")
+            return None
+        finally:
+            self._log_timing(
+                "find_consumable_car_card_action",
+                started,
+                capture_ms=capture_ms,
+                ocr_ms=ocr_ms,
+                action=action,
+                result=result_text,
+            )
 
     def find_car_card(
         self,

@@ -25,12 +25,11 @@ if TYPE_CHECKING:
 STEP_LABELS = {
     "race": "循环跑图",
     "buy": "批量买车",
-    "mastery": "熟练度加点",
+    "mastery": "熟练度加点 / 移除车辆",
     "auto_wheelspin": "自动抽奖",
-    "sell": "移除车辆",
 }
 
-PIPELINE_STEPS = ("race", "buy", "mastery", "auto_wheelspin", "sell")
+PIPELINE_STEPS = ("race", "buy", "mastery", "auto_wheelspin")
 DEFAULT_RACE_SKILL_POINTS = 50
 LogFn = Callable[..., None]
 
@@ -51,12 +50,10 @@ class PipelineOptions:
     wheelspin_use_all: bool
     super_wheelspin_use_all: bool
     normal_wheelspin_use_all: bool
-    remove_car_count: int
-    remove_car_use_all: bool
     total_loops: int
     infinite_loops: bool
-    continue_steps: tuple[bool, bool, bool, bool, bool]
-    next_steps: tuple[int, int, int, int, int]
+    continue_steps: tuple[bool, bool, bool, bool]
+    next_steps: tuple[int, int, int, int]
 
 
 class BackendRuntimeService:
@@ -145,7 +142,10 @@ class BackendRuntimeService:
         return value
 
     def _next_step_config(self, key: str, default: int) -> int:
-        return max(0, min(len(PIPELINE_STEPS) - 1, self._int_config(key, default) - 1))
+        value = self._int_config(key, default)
+        if value < 1 or value > len(PIPELINE_STEPS):
+            value = default
+        return value - 1
 
     def _read_pipeline_options(self) -> PipelineOptions:
         return PipelineOptions(
@@ -159,8 +159,6 @@ class BackendRuntimeService:
             wheelspin_use_all=bool(self.config.values.get("wheelspin_use_all", False)),
             super_wheelspin_use_all=bool(self.config.values.get("super_wheelspin_use_all", False)),
             normal_wheelspin_use_all=bool(self.config.values.get("normal_wheelspin_use_all", False)),
-            remove_car_count=self._int_config("sc_count", 30, minimum=0),
-            remove_car_use_all=bool(self.config.values.get("remove_car_use_all", False)),
             total_loops=self._int_config("global_loops", 10, minimum=1),
             infinite_loops=bool(self.config.values.get("global_loop_infinite", False)),
             continue_steps=(
@@ -168,14 +166,12 @@ class BackendRuntimeService:
                 bool(self.config.values.get("chk_2", False)),
                 bool(self.config.values.get("chk_3", False)),
                 bool(self.config.values.get("chk_4", True)),
-                bool(self.config.values.get("chk_5", True)),
             ),
             next_steps=(
                 self._next_step_config("next_1", 2),
                 self._next_step_config("next_2", 3),
                 self._next_step_config("next_3", 4),
-                self._next_step_config("next_4", 5),
-                self._next_step_config("next_5", 1),
+                self._next_step_config("next_4", 1),
             ),
         )
 
@@ -223,8 +219,14 @@ class BackendRuntimeService:
             "wheelspin_use_all": False,
             "super_wheelspin_use_all": False,
             "normal_wheelspin_use_all": False,
-            "sc_count": cars_per_loop,
-            "remove_car_use_all": False,
+            "chk_1": True,
+            "chk_2": True,
+            "chk_3": True,
+            "chk_4": True,
+            "next_1": 2,
+            "next_2": 3,
+            "next_3": 4,
+            "next_4": 1,
             "global_loops": final_loops,
             "global_loop_infinite": False,
             "calc_a": str(target_cr),
@@ -314,11 +316,6 @@ class BackendRuntimeService:
                             use_all=options.wheelspin_use_all,
                             super_use_all=options.super_wheelspin_use_all,
                             normal_use_all=options.normal_wheelspin_use_all,
-                        )
-                    elif step_name == "sell":
-                        success = flows.remove_car.find_and_remove_consumable_car(
-                            options.remove_car_count,
-                            use_all=options.remove_car_use_all,
                         )
                 except FlowCancelled:
                     break
@@ -447,10 +444,11 @@ class BackendRuntimeService:
             return
         try:
             # press F3 and debug here
-            flows = self._get_flows()
-            res = flows.remove_car.manufacturer.scan_for_text("斯巴鲁")
+            manufacturer = self._get_manufacturer()
+            res = manufacturer.scan_for_text("斯巴鲁")
             self.log(res, level="debug")
-            self.input_actions.game_click(res)
+            if res:
+                self.input_actions.game_click(res)
 
         except Exception as e:
             self.log(f"Debug: {e}", level="warning")
@@ -475,7 +473,10 @@ class BackendRuntimeService:
         def hotkey_thread() -> None:
             def on_press(k) -> None:
                 if k == keyboard.Key.f2:
-                    self.stop_all()
+                    if self.state.is_running:
+                        self.stop_all()
+                    else:
+                        self.start_pipeline("race")
                 elif k == keyboard.Key.f1:
                     self.toggle_pause()
                 elif k == keyboard.Key.f3:

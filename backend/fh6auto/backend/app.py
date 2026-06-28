@@ -13,7 +13,6 @@ from ..flows.auto_wheelspin import AutoWheelspinFlow
 from ..flows.buy_car import BuyCarFlow
 from ..flows.mastery import MasteryFlow
 from ..flows.race import RaceFlow
-from ..flows.remove_car import RemoveCarFlow
 from ..input.actions import InputActionsService
 from ..vision import (
     ImageCacheService,
@@ -233,18 +232,6 @@ class AppFlows:
             player_stats=services.player_stats,
             recovery=services.recovery,
             runtime=services.runtime,
-            log=log,
-        )
-        self.remove_car: RemoveCarFlow = RemoveCarFlow(
-            state=state,
-            game_window=services.game_window,
-            input_actions=services.input_actions,
-            image_matcher=services.image_matcher,
-            image_waits=services.image_waits,
-            manufacturer=services.manufacturer,
-            footer=services.footer,
-            recovery=services.recovery,
-            sleep=services.runtime.sleep,
             log=log,
         )
         services.runtime.set_flows(self)

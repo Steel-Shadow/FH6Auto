@@ -51,12 +51,10 @@ class BackendConfigService:
             "wheelspin_count",
             "normal_wheelspin_count",
             "wheelspin_sell_threshold",
-            "sc_count",
             "next_1",
             "next_2",
             "next_3",
             "next_4",
-            "next_5",
             "global_loops",
             "manufacturer_scan_steps",
         }
@@ -65,14 +63,12 @@ class BackendConfigService:
             "chk_2",
             "chk_3",
             "chk_4",
-            "chk_5",
             "auto_restart",
             "race_until_skill_cap",
             "mastery_use_all",
             "wheelspin_use_all",
             "super_wheelspin_use_all",
             "normal_wheelspin_use_all",
-            "remove_car_use_all",
             "global_loop_infinite",
         }
         string_keys = {"share_code", "restart_cmd", "calc_a", "calc_b", "calc_c", "calc_d", "log_level"}

@@ -6,7 +6,7 @@ from ..window import GameWindowService
 from ..backend.config_service import BackendConfigService
 from ..backend.state import RuntimeState
 from ..input.actions import InputActionsService
-from ..vision.car_cards import CarCardPageSelector, CarCardSearchOptions
+from ..vision.car_cards import CarCardPageSelector, ConsumableCarCardSearchOptions
 from ..vision.manufacturer import ManufacturerDetector
 from ..vision.matcher import ImageMatcherService
 from ..vision.player_stats import PlayerStatsDetector
@@ -75,6 +75,115 @@ class MasteryFlow:
         else:
             return False
 
+    def _enter_consumable_manufacturer_list(self) -> bool:
+        sleep = self.sleep
+        self.log("进入我的车辆.", level="debug")
+        self.input_actions.hw_press("enter")
+        sleep(2.0)
+
+        self.input_actions.hw_press("y")
+        sleep(0.5)
+        for _ in range(2):
+            self.input_actions.hw_press("down")
+            sleep(0.1)
+        self.input_actions.hw_press("enter")
+        sleep(0.1)
+        self.input_actions.hw_press("esc")
+        sleep(0.5)
+
+        self.input_actions.hw_press("backspace")
+        sleep(0.5)
+
+        manufacturer_pos = self.manufacturer.scan_for_text("斯巴鲁", threshold=0.75, label="消耗品制造商")
+        if not manufacturer_pos:
+            self.log("选择制造商失败", level="warning")
+            return False
+
+        self.input_actions.game_click(manufacturer_pos)
+        sleep(1.0)
+        return True
+
+    def _remove_selected_consumable_car(self) -> bool:
+        sleep = self.sleep
+        self.log("删除符合条件的消耗品车辆...", level="debug")
+        self.input_actions.move_to_game_coord(5, 5)
+        sleep(0.5)
+
+        # 若点击前车辆已选中，会直接弹出“选择操作”菜单；否则需要 Enter 打开菜单。
+        pos_cancel = self.image_waits.wait_for_footer_text_ui("取消", timeout=1.0, interval=0.2)
+        if not pos_cancel:
+            self.input_actions.hw_press("enter")
+            sleep(0.5)
+
+        for _ in range(4):
+            self.input_actions.hw_press("down")
+            sleep(0.1)
+        self.input_actions.hw_press("enter")
+        sleep(0.5)
+
+        self.input_actions.hw_press("down")
+        sleep(0.1)
+        self.input_actions.hw_press("enter")
+        sleep(1.0)
+
+        self.state.sc_count += 1
+        self.log(f"已移除消耗品车辆，累计移除 {self.state.sc_count} 辆。", level="debug")
+        return True
+
+    def _drive_selected_car_and_apply_mastery(self, effective_target: int) -> str | None:
+        sleep = self.sleep
+        self.log("确认上车并驾驶当前车辆...", level="debug")
+        self.input_actions.hw_press("enter")
+        sleep(1.0)
+        self.input_actions.hw_press("enter")
+
+        sleep(10.0)
+        pos_drive = self.image_waits.wait_for_footer_text_ui("驾驶")
+        if not pos_drive:
+            self.log("上新车后的检视，底部未找到“驾驶”", level="warning")
+            return "error"
+
+        # 退出新车检视界面，返回车辆菜单
+        self.input_actions.hw_press("esc")
+        sleep(1.5)
+
+        # 点击 升级与调校
+        self.input_actions.hw_press("down")
+        sleep(0.1)
+        self.input_actions.hw_press("enter")
+        sleep(1.0)
+
+        # 点击 车辆专精
+        for _ in range(7):
+            self.input_actions.hw_press("down")
+            sleep(0.1)
+        self.input_actions.hw_press("enter")
+        sleep(1.0)
+
+        self.input_actions.hw_press("enter")
+        sleep(1.2)
+        if self._check_no_skill_points():
+            return "技能点不足"
+
+        for dk in self.config.values["skill_dirs"]:
+            self.input_actions.hw_press(dk)
+            sleep(0.2)
+            self.input_actions.hw_press("enter")
+            sleep(1.2)
+            if self._check_no_skill_points():
+                return "技能点不足"
+
+        self.state.mastery_counter += 1
+        self.state.set_task("加点&删车", self.state.mastery_counter, effective_target)
+
+        self.input_actions.hw_press("esc")
+        sleep(1.2)
+        self.input_actions.hw_press("esc")
+        sleep(0.8)
+        self.input_actions.hw_press("up", delay=0.15)
+        sleep(0.8)
+        return None
+
     # ==========================================
     # --- 模块：熟练度加点 ---
     # ==========================================
@@ -83,10 +192,12 @@ class MasteryFlow:
         use_all = bool(use_all)
         sleep = self.sleep
         start_count = self.state.mastery_counter
+        start_remove_count = self.state.sc_count
 
         def finish(reason: str | None = None) -> bool:
             suffix = f"原因：{reason}" if reason else ""
-            self.log(f"熟练度加点流程结束：完成 {self.state.mastery_counter - start_count} 次。{suffix}")
+            removed_count = self.state.sc_count - start_remove_count
+            self.log(f"熟练度加点流程结束：完成 {self.state.mastery_counter - start_count} 次，移除 {removed_count} 辆。{suffix}")
             return True
 
         if not use_all and self.state.mastery_counter >= target_count:
@@ -151,27 +262,19 @@ class MasteryFlow:
         self.log("进入车辆界面...", level="debug")
         sleep(0.5)
 
-        while self.state.mastery_counter < effective_target:
-            self.log("进入我的车辆.", level="debug")
-            self.input_actions.hw_press("enter")
-            sleep(2.0)
-            self.input_actions.hw_press("backspace")
-            sleep(1.0)
+        current_page_position = max(0, int(self.state.memory_car_page or 0))
+        list_needs_reset = True
 
-            manufacturer_pos = self.manufacturer.scan_for_text("斯巴鲁", threshold=0.75, label="消耗品制造商")
-            if not manufacturer_pos:
-                self.log("选择制造商失败", level="warning")
+        while self.state.mastery_counter < effective_target:
+            if list_needs_reset and not self._enter_consumable_manufacturer_list():
                 return False
 
-            self.input_actions.game_click(manufacturer_pos)
-            sleep(1.0)
-            start_page = max(0, int(self.state.memory_car_page or 0))
+            start_page = current_page_position if list_needs_reset else 0
+            base_page = 0 if list_needs_reset else current_page_position
 
-            car_result = self.car_cards.find(
-                CarCardSearchOptions(
-                    "newCC.png",
-                    label="全新消耗品车辆",
-                    required_tag_text="全新",
+            car_result = self.car_cards.find_consumable_action(
+                ConsumableCarCardSearchOptions(
+                    label="消耗品车辆",
                     max_pages=self.NOT_FOUND_PAGE_LIMIT,
                     start_page=start_page,
                 )
@@ -179,69 +282,37 @@ class MasteryFlow:
 
             if not car_result:
                 self.log(
-                    f"从记忆页码 {start_page} 开始连续翻找 {self.NOT_FOUND_PAGE_LIMIT} 页仍未找到全新消耗品车辆，视为车辆已全部处理完毕。",
+                    f"从当前页码 {base_page + start_page} 开始连续翻找 {self.NOT_FOUND_PAGE_LIMIT} 页仍未找到可处理消耗品车辆，视为车辆已全部处理完毕。",
                     level="debug",
                 )
                 self.state.memory_car_page = 0  # 没找到说明车刷完了，清零记忆
                 for _ in range(2):
                     self.input_actions.hw_press("esc")
                     sleep(0.8)
-                return finish("未找到全新消耗品车辆")
+                return finish("未找到可处理消耗品车辆")
 
+            current_page_position = base_page + car_result.page_index
+            self.state.memory_car_page = current_page_position
             self.input_actions.game_click(car_result.position)
-            self.state.memory_car_page = car_result.page_index
-            self.log(f"锁定目标车辆！已记录当前页码: {car_result.page_index}", level="debug")
+            self.log(
+                f"锁定目标车辆，动作: {car_result.action}，已记录当前页码: {current_page_position}",
+                level="debug",
+            )
             sleep(0.5)
-            self.log("确认上车并驾驶当前车辆...", level="debug")
-            self.input_actions.hw_press("enter")
-            sleep(1.0)
-            self.input_actions.hw_press("enter")
 
-            sleep(10.0)
-            pos_drive = self.image_waits.wait_for_footer_text_ui("驾驶")
-            if not pos_drive:
-                self.log("上新车后的检视，底部未找到“驾驶”", level="warning")
-                return False
+            if car_result.action == "remove":
+                if not self._remove_selected_consumable_car():
+                    return False
+                list_needs_reset = False
+                continue
 
-            # 退出新车检视界面，返回车辆菜单
-            self.input_actions.hw_press("esc")
-            sleep(1.5)
-
-            # 点击 升级与调校
-            self.input_actions.hw_press("down")
-            sleep(0.1)
-            self.input_actions.hw_press("enter")
-            sleep(1.0)
-
-            # 点击 车辆专精
-            for _ in range(7):
-                self.input_actions.hw_press("down")
-                sleep(0.1)
-            self.input_actions.hw_press("enter")
-            sleep(1.0)
-
-            self.input_actions.hw_press("enter")
-            sleep(1.2)
-            if self._check_no_skill_points():
+            mastery_result = self._drive_selected_car_and_apply_mastery(effective_target)
+            if mastery_result == "技能点不足":
                 return finish("技能点不足")
+            if mastery_result is not None:
+                return False
+            list_needs_reset = True
 
-            for dk in self.config.values["skill_dirs"]:
-                self.input_actions.hw_press(dk)
-                sleep(0.2)
-                self.input_actions.hw_press("enter")
-                sleep(1.2)
-                if self._check_no_skill_points():
-                    return finish("技能点不足")
-
-            self.state.mastery_counter += 1
-            self.state.set_task("熟练度加点", self.state.mastery_counter, effective_target)
-
-            self.input_actions.hw_press("esc")
-            sleep(1.2)
-            self.input_actions.hw_press("esc")
-            sleep(0.8)
-            self.input_actions.hw_press("up", delay=0.15)
-            sleep(0.8)
         self.input_actions.hw_press("esc")
         sleep(1.2)
         self.input_actions.hw_press("esc")

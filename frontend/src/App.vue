@@ -7,16 +7,11 @@
   interface DraftConfig {
     [key: string]: DraftValue
     auto_restart?: boolean
-    calc_a?: string
-    calc_b?: string
-    calc_c?: string
-    calc_d?: string
     global_loop_infinite?: boolean
     global_loops?: number
     log_level?: string
     normal_wheelspin_count?: number
     normal_wheelspin_use_all?: boolean
-    remove_car_use_all?: boolean
     restart_cmd?: string
     share_code?: string
     skill_dirs?: Direction[]
@@ -53,6 +48,7 @@
     key: string
     title: string
     countKey: string
+    countLabel?: string
     useAllKey: string
     useAllLabel: string
   }
@@ -115,8 +111,9 @@
     { key: 'buy', title: '2. 批量买车', countKey: 'buy_count', useAllKey: '', useAllLabel: '' },
     {
       key: 'mastery',
-      title: '3. 熟练度加点',
+      title: '3. 加点&删车',
       countKey: 'mastery_count',
+      countLabel: '加点车辆数',
       useAllKey: 'mastery_use_all',
       useAllLabel: '用完技术点',
     },
@@ -127,21 +124,13 @@
       useAllKey: 'wheelspin_use_all',
       useAllLabel: '用完所有抽奖次数',
     },
-    {
-      key: 'sell',
-      title: '5. 移除车辆',
-      countKey: 'sc_count',
-      useAllKey: 'remove_car_use_all',
-      useAllLabel: '移除全部',
-    },
   ]
 
   const nextSteps = [
     { value: 1, label: '循环跑图' },
     { value: 2, label: '批量买车' },
-    { value: 3, label: '熟练度加点' },
+    { value: 3, label: '加点&删车' },
     { value: 4, label: '自动抽奖' },
-    { value: 5, label: '移除车辆' },
   ]
 
   const nextStepOptions = [{ value: 0, label: '停止' }, ...nextSteps]
@@ -404,6 +393,14 @@
     }
   }
 
+  async function toggleRun () {
+    if (state.runtime.is_running) {
+      await stopAll()
+      return
+    }
+    await startModule('race')
+  }
+
   async function togglePause () {
     busy.value = true
     try {
@@ -446,29 +443,6 @@
     await setSkillDirs([])
   }
 
-  async function calculateAndApply () {
-    busy.value = true
-    try {
-      const data = await request<ConfigResponse>('/api/tools/calculate', {
-        method: 'POST',
-        body: JSON.stringify({
-          target_cr: Number(draft.calc_a || 0),
-          cost_per_car: Number(draft.calc_b || 81_700),
-          sp_per_car: Number(draft.calc_c || 30),
-          sp_per_race: Number(draft.calc_d || 50),
-          apply: true,
-        }),
-      })
-      copyConfig(data.config)
-      dirty.value = false
-      await refresh()
-    } catch (error) {
-      errorMessage.value = messageFromError(error)
-    } finally {
-      busy.value = false
-    }
-  }
-
   onMounted(() => {
     refresh()
     window.setInterval(refresh, 1000)
@@ -488,13 +462,39 @@
 
       <template #append>
         <div class="d-flex align-center ga-2">
+          <div class="app-bar-stats d-none d-md-flex align-center ga-2">
+            <div class="app-bar-stat app-bar-task">
+              <span class="stat-label">当前任务</span>
+              <span class="stat-value text-truncate">{{ state.runtime.current_task || '等待中' }}</span>
+            </div>
+
+            <v-chip :color="statusColor" size="small" variant="tonal">{{ statusLabel }}</v-chip>
+
+            <div class="app-bar-stat">
+              <span class="stat-label">当前进度</span>
+              <span class="stat-value">{{ progressText }} · 循环 {{ state.runtime.loop.current || 0 }}/{{ loopTotalText }}</span>
+            </div>
+
+            <v-chip color="primary" size="small" variant="tonal">{{ progressPercentText }}</v-chip>
+
+            <div class="app-bar-stat">
+              <span class="stat-label">总耗时</span>
+              <span class="stat-value">{{ elapsedText }}</span>
+            </div>
+          </div>
+
           <v-btn :disabled="busy" variant="tonal" @click="togglePause">
             {{ state.runtime.is_paused ? '继续' : '暂停' }}
             <kbd class="shortcut">F1</kbd>
           </v-btn>
 
-          <v-btn color="error" :disabled="busy" variant="tonal" @click="stopAll">
-            停止
+          <v-btn
+            :color="state.runtime.is_running ? 'error' : 'success'"
+            :disabled="busy"
+            variant="tonal"
+            @click="toggleRun"
+          >
+            {{ state.runtime.is_running ? '停止' : '开始' }}
             <kbd class="shortcut">F2</kbd>
           </v-btn>
         </div>
@@ -505,84 +505,13 @@
       <v-container class="app-shell py-4" fluid>
         <v-alert v-if="errorMessage" class="mb-3" type="error" variant="tonal">{{ errorMessage }}</v-alert>
 
-        <v-row align="stretch" class="mb-3">
-          <v-col cols="12" md="5">
-            <v-card class="h-100" variant="outlined">
-              <v-card-text class="d-flex align-center justify-space-between ga-4">
-                <div class="d-flex align-center ga-3 min-w-0">
-                  <v-avatar color="primary" size="40" variant="tonal">
-                    <v-icon icon="mdi-flag-checkered" />
-                  </v-avatar>
-
-                  <div class="min-w-0">
-                    <div class="text-caption text-medium-emphasis mb-1">当前任务</div>
-                    <div class="text-h6 font-weight-medium text-truncate">{{ state.runtime.current_task || '等待中' }}</div>
-                  </div>
-                </div>
-
-                <v-chip :color="statusColor" size="small" variant="tonal">{{ statusLabel }}</v-chip>
-              </v-card-text>
-            </v-card>
-          </v-col>
-
-          <v-col cols="12" md="5">
-            <v-card class="h-100" variant="outlined">
-              <v-card-text>
-                <div class="d-flex align-center justify-space-between ga-4 mb-3">
-                  <div class="d-flex align-center ga-3">
-                    <v-avatar color="primary" size="40" variant="tonal">
-                      <v-icon icon="mdi-progress-check" />
-                    </v-avatar>
-
-                    <div>
-                      <div class="text-caption text-medium-emphasis mb-1">当前进度</div>
-                      <div class="text-h6 font-weight-medium">{{ progressText }}</div>
-                    </div>
-                  </div>
-
-                  <div class="text-right">
-                    <v-chip color="primary" size="small" variant="tonal">{{ progressPercentText }}</v-chip>
-
-                    <div class="text-caption text-medium-emphasis mt-1">
-                      循环 {{ state.runtime.loop.current || 0 }} / {{ loopTotalText }}
-                    </div>
-                  </div>
-                </div>
-
-                <v-progress-linear
-                  color="primary"
-                  height="8"
-                  :model-value="progressPercent"
-                  rounded
-                />
-              </v-card-text>
-            </v-card>
-          </v-col>
-
-          <v-col cols="12" md="2">
-            <v-card class="h-100" variant="outlined">
-              <v-card-text class="d-flex align-center ga-3">
-                <v-avatar color="secondary" size="40" variant="tonal">
-                  <v-icon icon="mdi-timer-outline" />
-                </v-avatar>
-
-                <div>
-                  <div class="text-caption text-medium-emphasis mb-1">总耗时</div>
-                  <div class="text-h6 font-weight-medium">{{ elapsedText }}</div>
-                </div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-        </v-row>
-
         <v-row class="mb-3">
           <v-col
             v-for="(module, index) in modules"
             :key="module.key"
             cols="12"
-            md="4"
+            md="3"
             sm="6"
-            xl="3"
           >
             <v-card class="h-100 d-flex flex-column" variant="outlined">
               <v-card-title class="d-flex align-center justify-space-between ga-2">
@@ -644,7 +573,7 @@
                         density="compact"
                         :disabled="draftBoolean(module.useAllKey)"
                         hide-details
-                        label="执行次数"
+                        :label="module.countLabel || '执行次数'"
                         min="0"
                         :model-value="draft[module.countKey]"
                         type="number"
@@ -692,15 +621,15 @@
           </v-col>
         </v-row>
 
-        <v-row class="mb-3">
+        <v-row align="stretch" class="mb-3">
           <v-col>
-            <v-card variant="outlined">
+            <v-card class="h-100 d-flex flex-column" variant="outlined">
               <v-card-title class="d-flex align-center justify-space-between ga-2">
                 <span>运行设置</span>
                 <v-btn color="primary" :disabled="busy || !dirty" variant="tonal" @click="saveConfig">保存配置</v-btn>
               </v-card-title>
 
-              <v-card-text>
+              <v-card-text class="flex-grow-1">
                 <v-row>
                   <v-col cols="12" sm="4">
                     <v-text-field
@@ -763,13 +692,13 @@
           </v-col>
 
           <v-col>
-            <v-card variant="outlined">
+            <v-card class="h-100 d-flex flex-column" variant="outlined">
               <v-card-title class="d-flex align-center justify-space-between ga-2">
                 <span>技能路径</span>
                 <v-btn :disabled="busy" variant="tonal" @click="clearSkill">清除</v-btn>
               </v-card-title>
 
-              <v-card-text class="text-center">
+              <v-card-text class="flex-grow-1 text-center">
                 <div aria-label="技能树" class="skill-grid mb-3">
                   <v-btn
                     v-for="cell in skillGridCells"
@@ -788,66 +717,6 @@
                 <div class="text-body-2 text-medium-emphasis path-text">
                   {{ skillPathText }}
                 </div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-
-          <v-col>
-            <v-card variant="outlined">
-              <v-card-title class="d-flex align-center justify-space-between ga-2">
-                <span>次数计算器</span>
-
-                <v-btn color="primary" :disabled="busy || !draft.calc_a" variant="tonal" @click="calculateAndApply">
-                  计算并应用
-                </v-btn>
-              </v-card-title>
-
-              <v-card-text>
-                <v-row>
-                  <v-col cols="12">
-                    <v-text-field
-                      density="compact"
-                      hide-details
-                      inputmode="numeric"
-                      label="CR"
-                      :model-value="draft.calc_a"
-                      @update:model-value="setDraftValue('calc_a', $event)"
-                    />
-                  </v-col>
-
-                  <v-col cols="12">
-                    <v-text-field
-                      density="compact"
-                      hide-details
-                      inputmode="numeric"
-                      label="单车成本"
-                      :model-value="draft.calc_b"
-                      @update:model-value="setDraftValue('calc_b', $event)"
-                    />
-                  </v-col>
-
-                  <v-col cols="12">
-                    <v-text-field
-                      density="compact"
-                      hide-details
-                      inputmode="numeric"
-                      label="单车技能点"
-                      :model-value="draft.calc_c"
-                      @update:model-value="setDraftValue('calc_c', $event)"
-                    />
-                  </v-col>
-
-                  <v-col cols="12">
-                    <v-text-field
-                      density="compact"
-                      hide-details
-                      inputmode="numeric"
-                      label="单次跑图技能点"
-                      :model-value="draft.calc_d"
-                      @update:model-value="setDraftValue('calc_d', $event)"
-                    />
-                  </v-col>
-                </v-row>
               </v-card-text>
             </v-card>
           </v-col>
@@ -886,6 +755,36 @@
 </template>
 
 <style scoped>
+  .app-bar-stats {
+    max-width: min(62vw, 900px);
+    min-width: 0;
+  }
+
+  .app-bar-stat {
+    border-inline-start: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+    min-width: 92px;
+    padding-inline-start: 10px;
+  }
+
+  .app-bar-task {
+    max-width: 240px;
+  }
+
+  .stat-label {
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  .stat-value {
+    font-size: 0.9rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
   .skill-grid {
     display: grid;
     gap: 8px;
@@ -898,5 +797,24 @@
     min-width: 42px;
     padding: 0;
     width: 42px;
+  }
+
+  .log-box {
+    max-height: 280px;
+    overflow-y: auto;
+    padding-right: 6px;
+  }
+
+  .log-line {
+    display: flex;
+    gap: 10px;
+    margin: 0 0 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .log-line time {
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+    flex: 0 0 auto;
   }
 </style>

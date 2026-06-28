@@ -29,7 +29,7 @@ class ConfigUpdateRequest(BaseModel):
 
 
 class StartPipelineRequest(BaseModel):
-    step: Literal["race", "buy", "mastery", "auto_wheelspin", "sell"]
+    step: Literal["race", "buy", "mastery", "auto_wheelspin"]
 
 
 class SkillDirsRequest(BaseModel):
