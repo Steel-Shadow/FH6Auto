@@ -10,15 +10,11 @@ from ..backend.runtime import BackendRuntimeService
 from ..backend.state import RuntimeState
 from ..input.actions import InputActionsService
 from ..vision.cache import ImageCacheService
+from ..vision.footer import FooterDetector
 from ..vision.matcher import ImageMatcherService
 from ..vision.ocr import OcrService
 from ..vision.player_stats import PlayerStatsDetector
-
-NORMAL_WHEELSPIN_REFERENCE = "wheelspin.png"
-SUPER_WHEELSPIN_REFERENCE = "superwheelspin.png"
-NORMAL_DUPLICATE_POPUP_LIMIT = 1
-SUPER_DUPLICATE_POPUP_LIMIT = 3
-DEFAULT_OWNED_CAR_SELL_THRESHOLD = 100_000
+DEFAULT_OWNED_CAR_SELL_THRESHOLD = 1_000_000
 
 
 class AutoWheelspinFlow:
@@ -33,8 +29,8 @@ class AutoWheelspinFlow:
         image_cache: ImageCacheService,
         image_matcher: ImageMatcherService,
         input_actions: InputActionsService,
+        footer: FooterDetector,
         ocr: OcrService,
-        player_stats: PlayerStatsDetector,
         recovery: RecoveryService,
         runtime: BackendRuntimeService,
         log: Callable[..., None],
@@ -45,55 +41,28 @@ class AutoWheelspinFlow:
         self.image_cache = image_cache
         self.image_matcher = image_matcher
         self.input_actions = input_actions
+        self.footer = footer
         self.ocr = ocr
-        self.player_stats = player_stats
         self.recovery = recovery
         self.runtime = runtime
         self.log = log
 
-    def _footer_region(self):
-        x, y, w, h = self.game_window.regions["全界面"]
-        footer_y = y + int(h * 0.80)
-        return (x, footer_y, w, max(1, y + h - footer_y))
-
-    def _dialog_region(self):
-        x, y, w, h = self.game_window.regions["全界面"]
-        return (
-            x + int(w * 0.25),
-            y + int(h * 0.12),
-            max(1, int(w * 0.50)),
-            max(1, int(h * 0.76)),
-        )
-
-    def _read_footer_norm_text(self) -> str:
-        try:
-            results = self.ocr.read(
-                self.image_cache.capture_region(self._footer_region()), text_score=0.25
-            )
-        except Exception as e:
-            self.log(f"读取抽奖底部提示失败: {e}", level="warning")
-            return ""
-
-        parts = []
-        for result in results:
-            if result.score < 0.25:
-                continue
-            text = self.ocr.normalize_text(result.text)
-            if text:
-                parts.append(text)
-        return "".join(parts)
-
     def _detect_wheelspin_footer_state(self) -> str | None:
-        text = self._read_footer_norm_text()
-        if not text:
+        texts = self.footer.read_norm_text(threshold=0.25)
+        if not texts:
             return None
-        elif "跳过" in text:
+        joined_text = "".join(texts)
+
+        def contains(target: str) -> bool:
+            return any(target in text for text in texts) or target in joined_text
+
+        if contains("跳过"):
             return "skip"
-        elif "再次抽奖" in text:
+        elif contains("再次抽奖"):
             return "claim_again"
-        elif "领取奖励" in text:
+        elif contains("领取奖励"):
             return "claim"
-        elif "重置车辆位置" in text:
+        elif contains("重置车辆位置"):
             return "not_in_wheelspin"
         else:
             return None
@@ -111,17 +80,59 @@ class AutoWheelspinFlow:
         text = "".join(self.ocr.normalize_text(result.text) for result in results if result.score >= 0.25)
         return "已拥有车辆" in text or "添加至车库" in text
 
+    def _find_sell_price_value(self, threshold=0.25) -> int | None:
+        if not self.state.is_running:
+            return None
+        started = time.perf_counter()
+        capture_ms = None
+        result_text = "miss"
+        try:
+            capture_started = time.perf_counter()
+            x, y, w, h = self.game_window.regions["全界面"]
+            region = (
+                x + int(w * 0.25),
+                y + int(h * 0.12),
+                max(1, int(w * 0.50)),
+                max(1, int(h * 0.76)),
+            )
+            frame = self.image_cache.capture_frame(region)
+            capture_ms = (time.perf_counter() - capture_started) * 1000.0
+            screen_bgr = frame.image
+            if screen_bgr.size == 0:
+                return None
+
+            results = sorted(
+                (result for result in self.ocr.read(screen_bgr, text_score=threshold) if result.score >= threshold),
+                key=lambda result: (
+                    min((point[1] for point in result.box), default=0) if result.box else 0,
+                    min((point[0] for point in result.box), default=0) if result.box else 0,
+                ),
+            )
+            combined_text = "".join(result.text for result in results)
+            value = PlayerStatsDetector.parse_credit_value(combined_text)
+            if value is not None:
+                result_text = "hit"
+                self.log(f"[PriceOCR] 出售价格: CR {value:,} | OCR: {combined_text}", level="debug")
+            return value
+        except Exception as e:
+            result_text = "error"
+            self.log(f"find_sell_price_value 异常: {e}", level="warning")
+            return None
+        finally:
+            self._log_timing(
+                "_find_sell_price_value",
+                started,
+                capture_ms=capture_ms,
+                result=result_text,
+            )
+
     def _read_owned_car_sell_price(self, timeout: float = 1.5) -> int | None:
         deadline = time.time() + max(0.0, timeout)
         while time.time() < deadline:
             self.runtime.ensure_running()
-            price = self.player_stats.find_sell_price_value(
-                region=self._dialog_region(),
-                threshold=0.25,
-            )
+            price = self._find_sell_price_value()
             if price is not None:
                 return price
-            self.runtime.sleep(0.25)
         return None
 
     def _sell_owned_car(self) -> None:
@@ -369,22 +380,22 @@ class AutoWheelspinFlow:
 
         if should_run_super and not self._run_wheelspin_type(
             "超级抽奖",
-            SUPER_WHEELSPIN_REFERENCE,
+            "superwheelspin.png",
             target_count,
             super_use_all,
             progress_total,
-            SUPER_DUPLICATE_POPUP_LIMIT,
+            3,
         ):
             # 关闭弹窗，已无剩余超级抽奖
             self.input_actions.hw_press("enter")
 
         if should_run_normal and not self._run_wheelspin_type(
-            "普通抽奖",
-            NORMAL_WHEELSPIN_REFERENCE,
+            "抽奖",
+            "wheelspin.png",
             normal_count,
             normal_use_all,
             progress_total,
-            NORMAL_DUPLICATE_POPUP_LIMIT,
+            1,
         ):
             # 关闭弹窗，已无剩余抽奖
             self.input_actions.hw_press("enter")

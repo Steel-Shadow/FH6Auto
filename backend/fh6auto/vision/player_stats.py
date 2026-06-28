@@ -10,13 +10,16 @@ from ..backend.state import RuntimeState
 from .cache import Box
 from .cache import ImageCacheService
 from .ocr import OcrService, OcrText
+from .timing import VisionTimingMixin
 
 if TYPE_CHECKING:
     from ..window import GameWindowService
 
 
-class PlayerStatsDetector:
+class PlayerStatsDetector(VisionTimingMixin):
     """OCR-based FH6 numeric value detection."""
+
+    TIMING_NAME = "PlayerStats"
 
     def __init__(
         self,
@@ -32,21 +35,6 @@ class PlayerStatsDetector:
         self.game_window = game_window
         self.ocr = ocr
         self.log = log
-
-    @staticmethod
-    def _elapsed_ms(start: float) -> float:
-        return (time.perf_counter() - start) * 1000.0
-
-    def _log_timing(self, name: str, start: float, **details) -> None:
-        parts = [f"total={self._elapsed_ms(start):.1f}ms"]
-        for key, value in details.items():
-            if value is None:
-                continue
-            if isinstance(value, float):
-                parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
-            else:
-                parts.append(f"{key}={value}")
-        self.log(f"[VisionTiming] PlayerStats.{name} " + " ".join(parts), level="debug")
 
     @staticmethod
     def parse_credit_value(text: str) -> int | None:

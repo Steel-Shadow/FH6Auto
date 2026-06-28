@@ -9,6 +9,7 @@ from ..backend.state import RuntimeState
 from .cache import Box, Point
 from .cache import ImageCacheService
 from .ocr import OcrService
+from .timing import VisionTimingMixin
 
 if TYPE_CHECKING:
     from ..window import GameWindowService
@@ -24,8 +25,10 @@ class _FooterTextMatch:
     region_name: str | None = None
 
 
-class FooterDetector:
+class FooterDetector(VisionTimingMixin):
     """Detect footer hotkey hint text in the current game screen."""
+
+    TIMING_NAME = "Footer"
 
     def __init__(
         self,
@@ -43,21 +46,6 @@ class FooterDetector:
         self.log = log
         self.last_positions: dict[str, Point] = {}
         self._targets_cache: dict[tuple[str, ...], list[tuple[str, str]]] = {}
-
-    @staticmethod
-    def _elapsed_ms(start: float) -> float:
-        return (time.perf_counter() - start) * 1000.0
-
-    def _log_timing(self, name: str, start: float, **details) -> None:
-        parts = [f"total={self._elapsed_ms(start):.1f}ms"]
-        for key, value in details.items():
-            if value is None:
-                continue
-            if isinstance(value, float):
-                parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
-            else:
-                parts.append(f"{key}={value}")
-        self.log(f"[VisionTiming] Footer.{name} " + " ".join(parts), level="debug")
 
     @staticmethod
     def _point_bounds(points, *, offset_x=0, offset_y=0) -> Box | None:
@@ -119,6 +107,52 @@ class FooterDetector:
         bottom_h = max(1, int(sh * 0.20))
         bottom_y = sy + sh - bottom_h
         return [("底部提示栏", (sx, bottom_y, sw, bottom_h))]
+
+    def read_norm_text(self, region=None, threshold=0.25) -> list[str]:
+        """读取底部提示栏 OCR 文本，并返回归一化后的文本列表。"""
+        if not self.state.is_running:
+            return []
+
+        started = time.perf_counter()
+        capture_ms = 0.0
+        region_count = 0
+        item_count = 0
+        result_text = "empty"
+        try:
+            parts: list[str] = []
+            for _, roi in self._footer_text_regions(region):
+                region_count += 1
+                capture_started = time.perf_counter()
+                frame = self.image_cache.capture_frame(roi)
+                capture_ms += self._elapsed_ms(capture_started)
+                roi_bgr = frame.image
+                if roi_bgr.size == 0:
+                    continue
+
+                results = self.ocr.read(roi_bgr, text_score=threshold)
+                item_count += len(results)
+                for result in results:
+                    if result.score < threshold:
+                        continue
+                    text = self.ocr.normalize_text(result.text)
+                    if text:
+                        parts.append(text)
+
+            result_text = "hit" if parts else "empty"
+            return parts
+        except Exception as e:
+            result_text = "error"
+            self.log(f"read_norm_text 异常: {e}", level="warning")
+            return []
+        finally:
+            self._log_timing(
+                "read_norm_text",
+                started,
+                capture_ms=capture_ms,
+                regions=region_count,
+                items=item_count,
+                result=result_text,
+            )
 
     def find_text(self, target_text, region=None, threshold=0.65):
         """在当前画面的底部按键提示栏中定位目标文字。"""

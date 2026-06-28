@@ -13,6 +13,7 @@ from ..backend.state import RuntimeState
 from ..paths import get_img_path
 from .cache import ImageCacheService
 from .ocr import OcrService
+from .timing import VisionTimingMixin
 
 
 @dataclass(frozen=True)
@@ -44,8 +45,10 @@ class CarCardOcrCandidate:
     failed: tuple[str, ...]
 
 
-class ImageMatcherService:
+class ImageMatcherService(VisionTimingMixin):
     """提供当前画面的图像目标匹配，复合目标可使用 OCR 结果作为特征。"""
+
+    TIMING_NAME = "Match"
 
     RARITY_WORDS = ("传奇", "史诗", "稀有", "普通")
     TAG_WORDS = ("全新",)
@@ -67,21 +70,6 @@ class ImageMatcherService:
         self.last_positions: dict[str, tuple[int, int]] = {}
         self.sift_feature_cache = {}
         self._tag_contour_cache: dict[str, tuple[np.ndarray, tuple[int, int, int, int]] | None] = {}
-
-    @staticmethod
-    def _elapsed_ms(start: float) -> float:
-        return (time.perf_counter() - start) * 1000.0
-
-    def _log_timing(self, name: str, start: float, **details) -> None:
-        parts = [f"total={self._elapsed_ms(start):.1f}ms"]
-        for key, value in details.items():
-            if value is None:
-                continue
-            if isinstance(value, float):
-                parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
-            else:
-                parts.append(f"{key}={value}")
-        self.log(f"[VisionTiming] Match.{name} " + " ".join(parts), level="debug")
 
     @staticmethod
     def _crop_ratio(img, x1, y1, x2, y2):

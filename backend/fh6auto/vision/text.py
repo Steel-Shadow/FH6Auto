@@ -10,6 +10,7 @@ import numpy as np
 from ..backend.state import RuntimeState
 from .cache import Box, ImageCacheService, Point
 from .ocr import OcrService
+from .timing import VisionTimingMixin
 
 
 @dataclass(slots=True)
@@ -23,8 +24,10 @@ class _TextMatch:
     region_name: str | None = None
 
 
-class TextDetector:
+class TextDetector(VisionTimingMixin):
     """基于 OCR 引擎定位当前 UI 中的通用文字和规则菜单文字。"""
+
+    TIMING_NAME = "Text"
 
     def __init__(
         self,
@@ -40,21 +43,6 @@ class TextDetector:
         self.log = log
         self._text_targets_cache: dict[tuple[str, ...], list[tuple[str, str]]] = {}
         self.last_positions: dict[str, Point] = {}
-
-    @staticmethod
-    def _elapsed_ms(start: float) -> float:
-        return (time.perf_counter() - start) * 1000.0
-
-    def _log_timing(self, name: str, start: float, **details) -> None:
-        parts = [f"total={self._elapsed_ms(start):.1f}ms"]
-        for key, value in details.items():
-            if value is None:
-                continue
-            if isinstance(value, float):
-                parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
-            else:
-                parts.append(f"{key}={value}")
-        self.log(f"[VisionTiming] Text.{name} " + " ".join(parts), level="debug")
 
     @staticmethod
     def _point_bounds(points, *, offset_x=0, offset_y=0) -> Box | None:

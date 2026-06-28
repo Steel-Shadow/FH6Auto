@@ -15,6 +15,7 @@ from rapidocr import EngineType, RapidOCR
 
 from ..backend.state import RuntimeState
 from .cache import ImageCacheService
+from .timing import VisionTimingMixin
 
 if TYPE_CHECKING:
     from ..window import GameWindowService
@@ -31,8 +32,10 @@ class OcrText:
     box: tuple[tuple[float, float], ...] | None = None
 
 
-class OcrService:
+class OcrService(VisionTimingMixin):
     """提供 OCR 引擎能力和旧入口兼容委托。"""
+
+    TIMING_NAME = "OCR"
 
     def __init__(
         self,
@@ -63,21 +66,6 @@ class OcrService:
         self._recycle_read_interval = 1200
         self._recycle_seconds = 30 * 60
         self._ensure_engine()
-
-    @staticmethod
-    def _elapsed_ms(start: float) -> float:
-        return (time.perf_counter() - start) * 1000.0
-
-    def _log_timing(self, name: str, start: float, **details) -> None:
-        parts = [f"total={self._elapsed_ms(start):.1f}ms"]
-        for key, value in details.items():
-            if value is None:
-                continue
-            if isinstance(value, float):
-                parts.append(f"{key}={value:.1f}ms" if key.endswith("_ms") else f"{key}={value:.3f}")
-            else:
-                parts.append(f"{key}={value}")
-        self.log(f"[VisionTiming] OCR.{name} " + " ".join(parts), level="debug")
 
     def _add_nvidia_dll_paths(self) -> list[str]:
         try:

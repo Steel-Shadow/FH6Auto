@@ -76,8 +76,6 @@ class RaceFlow:
         return self.image_waits.wait_for_footer_text_ui(
             "查看赛事信息",
             region=self.game_window.regions["下"],
-            timeout=timeout,
-            interval=1.0,
         )
 
     def _find_like_author_prompt(self):
