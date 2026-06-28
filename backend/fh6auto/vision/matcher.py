@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from typing import Any
 
 import cv2
 import numpy as np
@@ -130,65 +131,203 @@ class ImageMatcherService(VisionTimingMixin):
         """车辆卡片按列优先：同一列从上到下，再移动到右侧下一列。"""
         return (float(x), float(y), -float(score))
 
-    def _segment_car_card_boxes(self, screen_bgr):
-        screen_h, screen_w = screen_bgr.shape[:2]
-        gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
-        mask = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)[1]
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    @staticmethod
+    def _median_step(values, *, min_step: float, max_step: float) -> float | None:
+        ordered = sorted(float(value) for value in values)
+        if len(ordered) < 2:
+            return None
 
-        min_w = max(100, int(screen_w * 0.06))
-        min_h = max(80, int(screen_h * 0.08))
+        diffs = [
+            right - left
+            for left, right in zip(ordered, ordered[1:], strict=False)
+            if min_step <= right - left <= max_step
+        ]
+        if not diffs:
+            return None
+        return float(np.median(diffs))
+
+    @staticmethod
+    def _looks_like_car_card(roi) -> bool:
+        """判断一个局部框是否像车辆卡片。
+
+        车辆卡片的稳定视觉特征是：上方大面积白底、底部有稀有度/PI 的高饱和彩色条。
+        这个检查用于过滤左侧厂商详情卡、空白网格，以及从大连通域拆分出的空格。
+        """
+        if roi is None or roi.size == 0:
+            return False
+
+        h, w = roi.shape[:2]
+        if h < 60 or w < 80:
+            return False
+
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        top = gray[: max(1, int(h * 0.70)), :]
+        bright_ratio = np.count_nonzero(top >= 205) / max(1, top.size)
+        if bright_ratio < 0.22:
+            return False
+
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        bottom = hsv[int(h * 0.68) :, :]
+        if bottom.size == 0:
+            return False
+        saturation = bottom[:, :, 1]
+        value = bottom[:, :, 2]
+        color_ratio = np.count_nonzero((saturation >= 70) & (value >= 110)) / max(1, saturation.size)
+        return bool(color_ratio >= 0.08)
+
+    def _find_car_card_color_bars(self, screen_bgr):
+        screen_h, screen_w = screen_bgr.shape[:2]
+        hsv = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
+        value = hsv[:, :, 2]
+        mask = np.where((saturation >= 80) & (value >= 120), 255, 0).astype(np.uint8)
+
+        list_left_limit = int(screen_w * 0.16)
         top_limit = int(screen_h * 0.14)
         bottom_limit = int(screen_h * 0.94)
+        mask[:top_limit, :] = 0
+        mask[bottom_limit:, :] = 0
+        mask[:, :list_left_limit] = 0
 
-        boxes = []
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+            iterations=1,
+        )
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        min_bar_w = max(70, int(screen_w * 0.055))
+        min_bar_h = max(6, int(screen_h * 0.012))
+        max_bar_h = max(35, int(screen_h * 0.060))
+
+        bars = []
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
-            if w < min_w or h < min_h:
+            if w < min_bar_w or h < min_bar_h or h > max_bar_h:
                 continue
-            if y < top_limit or y > bottom_limit:
+            if y < int(screen_h * 0.20):
                 continue
 
             aspect = w / h if h else 0
-            if not 0.9 <= aspect <= 1.8:
+            if aspect < 4.0:
                 continue
 
             area_ratio = cv2.contourArea(contour) / float(w * h)
-            if area_ratio < 0.45:
+            if area_ratio < 0.40:
                 continue
 
-            boxes.append((x, y, w, h))
+            bars.append((x, y, w, h))
 
-        if len(boxes) >= 4:
-            median_w = int(round(np.median([box[2] for box in boxes])))
-            median_h = int(round(np.median([box[3] for box in boxes])))
-            x_positions = self._cluster_axis_positions([box[0] for box in boxes], max(16, median_w // 3))
-            y_positions = self._cluster_axis_positions([box[1] for box in boxes], max(16, median_h // 3))
+        return sorted(bars, key=lambda item: (item[1], item[0]))
 
-            if len(x_positions) >= 2 and len(y_positions) >= 2:
-                grid_boxes = []
-                seen = set()
-                for x in x_positions:
-                    for y in y_positions:
-                        box = (
-                            max(0, x),
-                            max(0, y),
-                            min(median_w, screen_w - x),
-                            min(median_h, screen_h - y),
-                        )
-                        key = (box[0] // 6, box[1] // 6)
-                        if box[2] > 0 and box[3] > 0 and key not in seen:
-                            seen.add(key)
-                            grid_boxes.append(box)
-                if grid_boxes:
-                    boxes = grid_boxes
+    def _filter_car_card_color_bars_by_grid(self, bars, screen_w, screen_h):
+        if not bars:
+            return []
+
+        row_tolerance = max(8, int(screen_h * 0.025))
+        row_clusters = []
+        for bar in sorted(bars, key=lambda item: item[1] + item[3] / 2):
+            center_y = bar[1] + bar[3] / 2
+            if not row_clusters or abs(center_y - row_clusters[-1][0]) > row_tolerance:
+                row_clusters.append([center_y, [bar]])
+            else:
+                row_clusters[-1][1].append(bar)
+                row_clusters[-1][0] = float(
+                    np.mean([item[1] + item[3] / 2 for item in row_clusters[-1][1]])
+                )
+
+        strong_row_centers = [center for center, items in row_clusters if len(items) >= 2]
+        if not strong_row_centers:
+            return bars
+
+        fallback_card_h = max(80, int(round(screen_h * 0.23)))
+        row_pitch = self._median_step(
+            strong_row_centers,
+            min_step=fallback_card_h * 0.65,
+            max_step=fallback_card_h * 1.45,
+        )
+        base_row = min(strong_row_centers)
+
+        def is_aligned_to_grid(bar) -> bool:
+            center_y = bar[1] + bar[3] / 2
+            if any(abs(center_y - row_center) <= row_tolerance for row_center in strong_row_centers):
+                return True
+            if row_pitch is None:
+                return False
+
+            row_index = round((center_y - base_row) / row_pitch)
+            predicted = base_row + row_index * row_pitch
+            return bool(abs(center_y - predicted) <= row_tolerance)
+
+        return [bar for bar in bars if is_aligned_to_grid(bar)]
+
+    def _segment_car_card_boxes(self, screen_bgr):
+        screen_h, screen_w = screen_bgr.shape[:2]
+        bars = self._filter_car_card_color_bars_by_grid(
+            self._find_car_card_color_bars(screen_bgr),
+            screen_w,
+            screen_h,
+        )
+        if not bars:
+            return []
+
+        fallback_card_w = max(100, int(round(screen_w * 0.17)))
+        fallback_card_h = max(80, int(round(screen_h * 0.23)))
+
+        row_centers = self._cluster_axis_positions(
+            [y + h / 2 for _, y, _, h in bars],
+            max(8, int(screen_h * 0.025)),
+        )
+        col_lefts = self._cluster_axis_positions(
+            [x for x, _, _, _ in bars],
+            max(10, int(fallback_card_w * 0.18)),
+        )
+
+        row_pitch = self._median_step(
+            row_centers,
+            min_step=fallback_card_h * 0.65,
+            max_step=fallback_card_h * 1.45,
+        )
+        col_pitch = self._median_step(
+            col_lefts,
+            min_step=fallback_card_w * 0.65,
+            max_step=fallback_card_w * 1.45,
+        )
+
+        card_w = fallback_card_w
+        if col_pitch is not None:
+            card_w = int(round(min(fallback_card_w * 1.15, max(fallback_card_w * 0.75, col_pitch * 0.98))))
+
+        card_h = fallback_card_h
+        if row_pitch is not None:
+            card_h = int(round(min(fallback_card_h * 1.15, max(fallback_card_h * 0.75, row_pitch * 0.99))))
+
+        left_pad = max(4, int(round(card_w * 0.045)))
+        bottom_pad = max(3, int(round(card_h * 0.040)))
+        boxes = []
+        for bar_x, bar_y, bar_w, bar_h in bars:
+            x = max(0, int(round(bar_x - left_pad)))
+            y = max(0, int(round(bar_y + bar_h + bottom_pad - card_h)))
+            w = min(card_w, screen_w - x)
+            h = min(card_h, screen_h - y)
+            if w < card_w * 0.75 or h < card_h * 0.75:
+                continue
+
+            roi = screen_bgr[y : y + h, x : x + w]
+            if self._looks_like_car_card(roi):
+                boxes.append((x, y, w, h))
 
         boxes.sort(key=lambda item: self._car_card_column_order(item[0], item[1], item[2] * item[3]))
         deduped = []
         for box in boxes:
             x, y, w, h = box
             center = (x + w / 2, y + h / 2)
-            if any(abs(center[0] - (bx + bw / 2)) < 20 and abs(center[1] - (by + bh / 2)) < 20 for bx, by, bw, bh in deduped):
+            if any(
+                abs(center[0] - (bx + bw / 2)) < card_w * 0.20
+                and abs(center[1] - (by + bh / 2)) < card_h * 0.20
+                for bx, by, bw, bh in deduped
+            ):
                 continue
             deduped.append(box)
         return deduped
@@ -321,7 +460,7 @@ class ImageMatcherService(VisionTimingMixin):
             return False
 
         gray = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
-        mask = cv2.inRange(gray, 0, 80)
+        mask = np.where(gray <= 80, 255, 0).astype(np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8), iterations=1)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -386,7 +525,7 @@ class ImageMatcherService(VisionTimingMixin):
                 continue
 
             badge_gray = cv2.cvtColor(search[y : y + h, x : x + w], cv2.COLOR_BGR2GRAY)
-            black_mask = cv2.inRange(badge_gray, 0, 80)
+            black_mask = np.where(badge_gray <= 80, 255, 0).astype(np.uint8)
             black_ratio = np.count_nonzero(black_mask) / area
             if black_ratio < 0.06:
                 continue
@@ -916,6 +1055,17 @@ class ImageMatcherService(VisionTimingMixin):
                 result=result_text,
             )
 
+    def _create_sift(self, max_features=2500) -> Any | None:
+        sift_create = getattr(cv2, "SIFT_create", None)
+        if not callable(sift_create):
+            self.log("当前 OpenCV 不支持 SIFT。", level="warning")
+            return None
+        try:
+            return sift_create(nfeatures=int(max_features))
+        except Exception as e:
+            self.log(f"当前 OpenCV 不支持 SIFT：{e}", level="warning")
+            return None
+
     def _get_sift_reference_features(self, reference_path, max_features=2500):
         actual_path = get_img_path(reference_path)
         try:
@@ -933,10 +1083,8 @@ class ImageMatcherService(VisionTimingMixin):
             self.log(f"SIFT 参考图读取失败：{reference_path}", level="warning")
             return None
 
-        try:
-            sift = cv2.SIFT_create(nfeatures=int(max_features))
-        except Exception as e:
-            self.log(f"当前 OpenCV 不支持 SIFT：{e}", level="warning")
+        sift = self._create_sift(max_features)
+        if sift is None:
             return None
 
         keypoints, descriptors = sift.detectAndCompute(reference_gray, None)
@@ -977,8 +1125,12 @@ class ImageMatcherService(VisionTimingMixin):
         if len(good_matches) < 4:
             return None
 
-        src_pts = np.float32([reference_keypoints[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        dst_pts = np.float32([screen_keypoints[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        src_pts = np.asarray([reference_keypoints[m.queryIdx].pt for m in good_matches], dtype=np.float32).reshape(
+            -1, 1, 2
+        )
+        dst_pts = np.asarray([screen_keypoints[m.trainIdx].pt for m in good_matches], dtype=np.float32).reshape(
+            -1, 1, 2
+        )
         homography, inlier_mask = cv2.findHomography(
             src_pts,
             dst_pts,
@@ -993,8 +1145,8 @@ class ImageMatcherService(VisionTimingMixin):
             return None
 
         ref_h, ref_w = reference_shape
-        corners = np.float32([[0, 0], [ref_w, 0], [ref_w, ref_h], [0, ref_h]]).reshape(-1, 1, 2)
-        projected = cv2.perspectiveTransform(corners, homography).reshape(-1, 2)
+        corners = np.asarray([[0, 0], [ref_w, 0], [ref_w, ref_h], [0, ref_h]], dtype=np.float32).reshape(-1, 1, 2)
+        projected = np.asarray(cv2.perspectiveTransform(corners, homography), dtype=np.float32).reshape(-1, 2)
         center_x = float(projected[:, 0].mean())
         center_y = float(projected[:, 1].mean())
 
@@ -1041,7 +1193,10 @@ class ImageMatcherService(VisionTimingMixin):
             capture_ms = self._elapsed_ms(capture_started)
             screen_bgr = frame.image
             screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
-            sift = cv2.SIFT_create(nfeatures=int(max_features))
+            sift = self._create_sift(max_features)
+            if sift is None:
+                result_text = "sift_unavailable"
+                return None
             detect_started = time.perf_counter()
             screen_keypoints, screen_descriptors = sift.detectAndCompute(screen_gray, None)
             detect_ms = self._elapsed_ms(detect_started)

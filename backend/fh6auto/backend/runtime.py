@@ -7,6 +7,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from fh6auto.vision.matcher import ImageMatcherService
 from pynput import keyboard
 
 from .config_service import BackendConfigService
@@ -443,13 +444,7 @@ class BackendRuntimeService:
             self.log("Debug: 无法定位并聚焦游戏窗口，已中止。", level="warning")
             return
         try:
-            # press F3 and debug here
-            manufacturer = self._get_manufacturer()
-            res = manufacturer.scan_for_text("斯巴鲁")
-            self.log(res, level="debug")
-            if res:
-                self.input_actions.game_click(res)
-
+            pass
         except Exception as e:
             self.log(f"Debug: {e}", level="warning")
         finally:

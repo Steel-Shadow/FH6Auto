@@ -9,7 +9,7 @@ import numpy as np
 
 from ..backend.state import RuntimeState
 from .cache import Box, ImageCacheService, Point
-from .ocr import OcrService
+from .ocr import OcrService, OcrText
 from .timing import VisionTimingMixin
 
 
@@ -213,7 +213,7 @@ class TextDetector(VisionTimingMixin):
             return []
 
         screen_h, screen_w = text_map.shape[:2]
-        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(text_map, 8)
+        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(text_map, connectivity=8)
         clean = np.zeros_like(text_map)
         screen_area = screen_w * screen_h
         for idx in range(1, component_count):
@@ -414,10 +414,10 @@ class TextDetector(VisionTimingMixin):
             screen_bgr = frame.image
             boxes = self._find_menu_button_candidate_boxes(screen_bgr)
             boxes_count = len(boxes)
-            best = None
+            best: _TextMatch | None = None
             region_x, region_y = frame.origin
 
-            def consider_result(result, box, *, require_ocr_box=False):
+            def consider_result(result: OcrText, box: Box, *, require_ocr_box=False) -> bool:
                 nonlocal best
                 x, y, _, _ = box
                 ocr_box = self._point_bounds(result.box, offset_x=x + region_x, offset_y=y + region_y)
@@ -445,7 +445,8 @@ class TextDetector(VisionTimingMixin):
 
                 candidate_too_tall = h > max(90, int(screen_bgr.shape[0] * 0.12))
                 if candidate_too_tall:
-                    for result in self.ocr.read(roi, text_score=0.25):
+                    ocr_results: list[OcrText] = self.ocr.read(roi, text_score=0.25)
+                    for result in ocr_results:
                         consider_result(result, box, require_ocr_box=True)
                     continue
 
@@ -455,7 +456,8 @@ class TextDetector(VisionTimingMixin):
                     matched = consider_result(line_result, box)
 
                 if not matched:
-                    for result in self.ocr.read(roi, text_score=0.25):
+                    ocr_results = self.ocr.read(roi, text_score=0.25)
+                    for result in ocr_results:
                         consider_result(result, box)
 
             if best is not None and best.box is not None:

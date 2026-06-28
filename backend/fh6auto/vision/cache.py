@@ -75,12 +75,22 @@ class ImageCacheService:
             self.image_cache[cache_key] = tpl
         return tpl, actual_path
 
-    def resolve_capture_region(self, region=None):
+    @staticmethod
+    def _normalize_region(region) -> Region | None:
+        if region is None:
+            return None
+        try:
+            x, y, w, h = region
+        except (TypeError, ValueError):
+            return None
+        return (int(x), int(y), int(w), int(h))
+
+    def resolve_capture_region(self, region=None) -> Region | None:
         """返回实际截图区域；未指定时默认使用游戏窗口客户区。"""
         if region is not None:
-            return region
+            return self._normalize_region(region)
         try:
-            return self.game_window.regions.get("全界面")
+            return self._normalize_region(self.game_window.regions.get("全界面"))
         except Exception:
             return None
 
@@ -133,7 +143,7 @@ class ImageCacheService:
 
         return CaptureFrame(
             image=screen_bgr,
-            region=tuple(map(int, capture_region)) if capture_region is not None else None,
+            region=capture_region,
             origin=self.capture_offset(capture_region),
         )
 

@@ -83,7 +83,7 @@ class CarCardPageSelector:
         if current_page > 0:
             self.log(f"从第 {current_page} 页开始扫描 {options.label}...", level="debug")
             for _ in range(current_page):
-                self._turn_page(options)
+                self._turn_page(options.page_step_presses, options.turn_key, options.turn_key_delay)
                 self.sleep(0.15)
 
         for page_offset in range(max_pages):
@@ -111,7 +111,7 @@ class CarCardPageSelector:
                 break
 
             self.log(f"当前页面未找到{options.label}，向右翻页寻找... (第 {page_offset + 1} 次翻页)", level="debug")
-            self._turn_page(options)
+            self._turn_page(options.page_step_presses, options.turn_key, options.turn_key_delay)
             self.sleep(options.turn_pause)
             current_page += 1
 
@@ -127,7 +127,7 @@ class CarCardPageSelector:
         if current_page > 0:
             self.log(f"从第 {current_page} 页开始扫描 {options.label}...", level="debug")
             for _ in range(current_page):
-                self._turn_page(options)
+                self._turn_page(options.page_step_presses, options.turn_key, options.turn_key_delay)
                 self.sleep(0.15)
 
         for page_offset in range(max_pages):
@@ -151,13 +151,13 @@ class CarCardPageSelector:
                 break
 
             self.log(f"当前页面未找到{options.label}，向右翻页寻找... (第 {page_offset + 1} 次翻页)", level="debug")
-            self._turn_page(options)
+            self._turn_page(options.page_step_presses, options.turn_key, options.turn_key_delay)
             self.sleep(options.turn_pause)
             current_page += 1
 
         return None
 
-    def _turn_page(self, options: CarCardSearchOptions) -> None:
-        for _ in range(max(1, int(options.page_step_presses))):
-            self.input_actions.hw_press(options.turn_key, delay=options.turn_key_delay)
+    def _turn_page(self, page_step_presses: int, turn_key: str, turn_key_delay: float) -> None:
+        for _ in range(max(1, int(page_step_presses))):
+            self.input_actions.hw_press(turn_key, delay=turn_key_delay)
             self.sleep(0.1)
