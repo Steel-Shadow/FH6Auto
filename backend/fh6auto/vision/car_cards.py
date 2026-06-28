@@ -20,15 +20,8 @@ class CarCardSearchOptions:
     excluded_tag_text: str | None = None
     exclude_driving: bool = False
     region: tuple[int, int, int, int] | None = None
-    fast_mode: bool = True
-    candidate_threshold: float = 0.50
     final_threshold: float = 0.78
-    title_threshold: float = 0.72
-    pi_threshold: float = 0.82
-    rarity_threshold: float = 0.68
-    body_threshold: float = 0.55
     tag_threshold: float = 0.70
-    exclude_tag_threshold: float = 0.65
     max_candidates: int = 80
     mask_areas: Sequence[MaskArea] | None = None
     start_page: int = 0
@@ -104,15 +97,8 @@ class CarCardPageSelector:
                 excluded_tag_text=options.excluded_tag_text,
                 exclude_driving=options.exclude_driving,
                 region=options.region,
-                fast_mode=options.fast_mode,
-                candidate_threshold=options.candidate_threshold,
                 final_threshold=options.final_threshold,
-                title_threshold=options.title_threshold,
-                pi_threshold=options.pi_threshold,
-                rarity_threshold=options.rarity_threshold,
-                body_threshold=options.body_threshold,
                 tag_threshold=options.tag_threshold,
-                exclude_tag_threshold=options.exclude_tag_threshold,
                 max_candidates=options.max_candidates,
                 mask_areas=options.mask_areas,
             )

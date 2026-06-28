@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 from rapidocr import EngineType, RapidOCR
 
-from ..automation.window import GameWindowService
 from ..backend.state import RuntimeState
 from .cache import ImageCacheService
 
 if TYPE_CHECKING:
+    from ..window import GameWindowService
     from .footer import FooterDetector
     from .manufacturer import ManufacturerDetector
     from .player_stats import PlayerStatsDetector
@@ -118,11 +118,31 @@ class OcrService:
             }
             self._engine = RapidOCR(params=params)
             self._providers = self._read_session_providers()
+            if not self._cuda_provider_active():
+                provider_summary = ", ".join(
+                    f"{name}={providers or ['unknown']}" for name, providers in self._providers.items()
+                )
+                self._engine = None
+                self._providers = {}
+                raise RuntimeError(
+                    "OCR CUDA 初始化失败，已拒绝回退到 CPU。"
+                    f"当前 providers: {provider_summary or 'unknown'}。"
+                    "请确认 nvidia-cuda-runtime、nvidia-cudnn-cu13 等依赖 DLL 可被加载。"
+                )
             provider_summary = ", ".join(
                 f"{name}={providers or ['unknown']}" for name, providers in self._providers.items()
             )
             self.log(f"OCR 引擎已初始化，{provider_summary or 'providers=unknown'}。", level="debug")
             return self._engine
+
+    def _cuda_provider_active(self) -> bool:
+        if not self._providers:
+            return False
+        for name in ("text_det", "text_cls", "text_rec"):
+            providers = self._providers.get(name) or []
+            if "CUDAExecutionProvider" not in providers:
+                return False
+        return True
 
     def _read_session_providers(self) -> dict[str, list[str] | None]:
         providers: dict[str, list[str] | None] = {}
@@ -244,7 +264,6 @@ class OcrService:
             )
         return output
 
-
     def recognize_line(self, img: np.ndarray | str | Path, *, min_score=0.5) -> OcrText | None:
         results = self.read(img, use_det=False, use_cls=False, text_score=min_score)
         if not results:
@@ -255,68 +274,4 @@ class OcrService:
     def recognize_cell_text(self, cell_bgr: np.ndarray, *, min_score=0.5) -> OcrText | None:
         if cell_bgr is None or cell_bgr.size == 0:
             return None
-
         return self.recognize_line(cell_bgr, min_score=min_score)
-
-    def find_any_text_ui(self, text_list, region=None, threshold=0.65):
-        """兼容旧入口；实际实现位于 TextDetector。"""
-        detector = self.text_detector
-        if detector is None:
-            self.log("find_any_text_ui 未绑定 TextDetector。", level="warning")
-            return None
-        return detector.find_any_text_ui(text_list, region=region, threshold=threshold)
-
-    def find_sell_price_value(self, region=None, threshold=0.25) -> int | None:
-        """兼容旧入口；实际实现位于 PlayerStatsDetector。"""
-        detector = self.player_stats
-        if detector is None:
-            self.log("find_sell_price_value 未绑定 PlayerStatsDetector。", level="warning")
-            return None
-        return detector.find_sell_price_value(region=region, threshold=threshold)
-
-    def find_current_credit_value(self, region=None, threshold=0.25) -> int | None:
-        """兼容旧入口；实际实现位于 PlayerStatsDetector。"""
-        detector = self.player_stats
-        if detector is None:
-            self.log("find_current_credit_value 未绑定 PlayerStatsDetector。", level="warning")
-            return None
-        return detector.find_current_credit_value(region=region, threshold=threshold)
-
-    def find_current_skill_points_value(self, region=None, threshold=0.25) -> int | None:
-        """兼容旧入口；实际实现位于 PlayerStatsDetector。"""
-        detector = self.player_stats
-        if detector is None:
-            self.log("find_current_skill_points_value 未绑定 PlayerStatsDetector。", level="warning")
-            return None
-        return detector.find_current_skill_points_value(region=region, threshold=threshold)
-
-    def find_menu_text_ui(self, target_text, region=None, threshold=0.65):
-        """兼容旧入口；实际实现位于 TextDetector。"""
-        detector = self.text_detector
-        if detector is None:
-            self.log("find_menu_text_ui 未绑定 TextDetector。", level="warning")
-            return None
-        return detector.find_menu_text_ui(target_text, region=region, threshold=threshold)
-
-    def find_footer_text_ui(self, target_text, region=None, threshold=0.65):
-        """兼容旧入口；实际实现位于 FooterDetector。"""
-        detector = self.footer
-        if detector is None:
-            self.log("find_footer_text_ui 未绑定 FooterDetector。", level="warning")
-            return None
-        return detector.find_text(target_text, region=region, threshold=threshold)
-
-    def find_manufacturer_text(self, target_text, region=None, threshold=0.75):
-        """兼容旧入口；实际实现位于 ManufacturerDetector。"""
-        detector = self.manufacturer
-        if detector is None:
-            self.log("find_manufacturer_text 未绑定 ManufacturerDetector。", level="warning")
-            return None
-        return detector.find_text(target_text, region=region, threshold=threshold)
-
-    def _find_manufacturer_cells(self, screen_bgr):
-        """兼容旧调试入口；实际实现位于 ManufacturerDetector。"""
-        detector = self.manufacturer
-        if detector is None:
-            return []
-        return detector.find_cells(screen_bgr)

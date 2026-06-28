@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ..automation.recovery import RecoveryService
+from ..recovery import RecoveryService
 from ..backend.config_service import BackendConfigService
 from ..backend.state import RuntimeState
 from ..input.actions import InputActionsService

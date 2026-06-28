@@ -308,37 +308,41 @@ class ImageMatcherService:
             return False
 
         card_h, card_w = card_bgr.shape[:2]
-        x1 = int(round(card_w * 0.68))
-        y1 = int(round(card_h * 0.60))
-        x2 = min(card_w, int(round(card_w * 0.88)))
-        y2 = min(card_h, int(round(card_h * 0.88)))
+        x1 = int(round(card_w * 0.72))
+        y1 = int(round(card_h * 0.65))
+        x2 = min(card_w, int(round(card_w * 0.995)))
+        y2 = min(card_h, int(round(card_h * 0.99)))
         search = card_bgr[y1:y2, x1:x2]
         if search.size == 0:
             return False
 
         gray = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
-        mask = cv2.inRange(gray, 0, 70)
+        mask = cv2.inRange(gray, 0, 80)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8), iterations=1)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         min_w = max(5, int(card_w * 0.030))
         min_h = max(5, int(card_h * 0.030))
-        max_w = max(min_w + 1, int(card_w * 0.110))
-        max_h = max(min_h + 1, int(card_h * 0.110))
+        max_w = max(min_w + 1, int(card_w * 0.115))
+        max_h = max(min_h + 1, int(card_h * 0.145))
 
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             if not (min_w <= w <= max_w and min_h <= h <= max_h):
                 continue
             aspect = w / max(1, h)
-            if not 0.70 <= aspect <= 1.45:
+            if not 0.65 <= aspect <= 1.55:
                 continue
             area = cv2.contourArea(contour)
             fill_ratio = area / max(1, w * h)
-            if not 0.28 <= fill_ratio <= 0.90:
+            if not 0.20 <= fill_ratio <= 0.85:
+                continue
+            center_x = (x + w / 2) / max(1, search.shape[1])
+            center_y = (y + h / 2) / max(1, search.shape[0])
+            if center_x < 0.55 or center_y < 0.35:
                 continue
             circularity = ImageMatcherService._contour_circularity(contour)
-            if 0.18 <= circularity <= 0.95:
+            if 0.10 <= circularity <= 0.95:
                 return True
 
         return False
@@ -684,15 +688,8 @@ class ImageMatcherService:
         excluded_tag_text=None,
         exclude_driving=False,
         region=None,
-        fast_mode=True,
-        candidate_threshold=0.50,
         final_threshold=0.78,
-        title_threshold=0.72,
-        pi_threshold=0.82,
-        rarity_threshold=0.68,
-        body_threshold=0.55,
         tag_threshold=0.70,
-        exclude_tag_threshold=0.65,
         max_candidates=80,
         mask_areas=None,
     ):

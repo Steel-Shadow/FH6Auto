@@ -1,4 +1,4 @@
-test/test_images/
+debug/
 config.json
 .vscode/
 /frontend/node_modules/

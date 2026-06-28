@@ -7,8 +7,8 @@ from collections.abc import Callable
 
 from ..paths import LOG_FILE, auto_extract_images
 from .state import RuntimeState
-from ..automation.recovery import RecoveryService
-from ..automation.window import GameWindowService
+from ..recovery import RecoveryService
+from ..window import GameWindowService
 from ..flows.auto_wheelspin import AutoWheelspinFlow
 from ..flows.buy_car import BuyCarFlow
 from ..flows.mastery import MasteryFlow
@@ -151,6 +151,7 @@ class AppServices:
             config=self.config,
             log=log,
         )
+        self.runtime.set_debug_dependencies(image_cache=self.image_cache, manufacturer=self.manufacturer)
         self.ocr.manufacturer = self.manufacturer
         self.player_stats: PlayerStatsDetector = PlayerStatsDetector(
             state=state,

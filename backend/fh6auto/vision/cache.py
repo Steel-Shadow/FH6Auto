@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 import pyautogui
 from PIL import ImageGrab
 
-from ..automation.window import GameWindowService
 from ..paths import get_img_path
+
+if TYPE_CHECKING:
+    from ..window import GameWindowService
 
 Point = tuple[int, int]
 Region = tuple[int, int, int, int]

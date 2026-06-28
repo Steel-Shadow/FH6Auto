@@ -1,8 +1,8 @@
 from __future__ import annotations
 from collections.abc import Callable
 
-from ..automation.recovery import RecoveryService
-from ..automation.window import GameWindowService
+from ..recovery import RecoveryService
+from ..window import GameWindowService
 from ..backend.config_service import BackendConfigService
 from ..backend.state import RuntimeState
 from ..input.actions import InputActionsService
@@ -179,17 +179,10 @@ class MasteryFlow:
                     "newCC.png",
                     label="全新消耗品车辆",
                     required_tag_text="全新",
-                    final_threshold=0.78,
-                    title_threshold=0.72,
-                    pi_threshold=0.82,
-                    rarity_threshold=0.68,
-                    body_threshold=0.55,
-                    tag_threshold=0.70,
                     max_pages=self.NOT_FOUND_PAGE_LIMIT,
                     start_page=start_page,
                     page_timeout=1.5,
                     interval=0.2,
-                    fast_mode=True,
                 )
             )
 

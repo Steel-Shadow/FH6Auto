@@ -3,12 +3,15 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from ..automation.window import GameWindowService
 from ..backend.state import RuntimeState
 from .cache import Box, Point
 from .cache import ImageCacheService
 from .ocr import OcrService
+
+if TYPE_CHECKING:
+    from ..window import GameWindowService
 
 
 @dataclass(frozen=True)
@@ -188,7 +191,7 @@ class FooterDetector:
             return None
         except Exception as e:
             result_text = "error"
-            self.log(f"find_footer_text_ui 异常: {e}", level="warning")
+            self.log(f"find_text 异常: {e}", level="warning")
             return None
         finally:
             self._log_timing(

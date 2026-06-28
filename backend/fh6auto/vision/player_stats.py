@@ -4,12 +4,15 @@ import re
 import time
 import unicodedata
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from ..automation.window import GameWindowService
 from ..backend.state import RuntimeState
 from .cache import Box
 from .cache import ImageCacheService
 from .ocr import OcrService, OcrText
+
+if TYPE_CHECKING:
+    from ..window import GameWindowService
 
 
 class PlayerStatsDetector:

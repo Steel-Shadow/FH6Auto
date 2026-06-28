@@ -10,7 +10,7 @@ from ..backend.config_service import BackendConfigService
 from ..backend.state import RuntimeState
 from ..input.actions import InputActionsService
 from .cache import ImageCacheService
-from .ocr import OcrService
+from .ocr import OcrService, OcrText
 from .polling import PollingWaiter
 
 Box = tuple[int, int, int, int]
@@ -196,10 +196,15 @@ class ManufacturerDetector:
                 first_row_y = raw_top
 
         detected_bottom = self._grid_bottom(screen_bgr, header_box)
-        fallback_bottom = int(h * 0.86)
-        table_bottom = detected_bottom if detected_bottom is not None else fallback_bottom
-        table_bottom = max(table_bottom, first_row_y + cell_h)
-        table_bottom = min(h, max(table_bottom, fallback_bottom))
+        raw_bottom = max((cell[1] + cell[3] for cell in raw_cells), default=None)
+        bottom_candidates = [first_row_y + cell_h]
+        if detected_bottom is not None:
+            bottom_candidates.append(detected_bottom)
+        if raw_bottom is not None:
+            bottom_candidates.append(raw_bottom)
+        if detected_bottom is None and raw_bottom is None:
+            bottom_candidates.append(int(h * 0.86))
+        table_bottom = min(h, max(bottom_candidates))
 
         row_count = max(1, min(16, int((table_bottom - first_row_y) // row_step) + 1))
 
@@ -231,12 +236,89 @@ class ManufacturerDetector:
             return grid_cells
         return self._grid_from_cells(screen_bgr, raw_cells)
 
+    @staticmethod
+    def _ocr_box_center(box: tuple[tuple[float, float], ...] | None) -> tuple[float, float] | None:
+        if not box:
+            return None
+        xs = [point[0] for point in box]
+        ys = [point[1] for point in box]
+        if not xs or not ys:
+            return None
+        return (sum(xs) / len(xs), sum(ys) / len(ys))
+
+    @staticmethod
+    def _cell_contains_point(cell_box: Box, point: tuple[float, float], *, margin: int = 3) -> bool:
+        x, y, cell_w, cell_h = cell_box
+        px, py = point
+        return x - margin <= px <= x + cell_w + margin and y - margin <= py <= y + cell_h + margin
+
+    @staticmethod
+    def _table_crop_box(screen_bgr, cells: list[Box]) -> Box:
+        h, w = screen_bgr.shape[:2]
+        min_x = min(cell[0] for cell in cells)
+        min_y = min(cell[1] for cell in cells)
+        max_x = max(cell[0] + cell[2] for cell in cells)
+        max_y = max(cell[1] + cell[3] for cell in cells)
+        margin_x = max(4, int(round((max_x - min_x) * 0.01)))
+        margin_y = max(4, int(round((max_y - min_y) * 0.02)))
+        x1 = max(0, min_x - margin_x)
+        y1 = max(0, min_y - margin_y)
+        x2 = min(w, max_x + margin_x)
+        y2 = min(h, max_y + margin_y)
+        return (x1, y1, max(0, x2 - x1), max(0, y2 - y1))
+
+    def detect_cell_texts(self, screen_bgr, cells: list[Box] | None = None) -> tuple[dict[Box, OcrText], float, int]:
+        """用 GPU det OCR 一次识别制造商表格，并把 OCR 结果归属到视觉单元格。"""
+        if cells is None:
+            cells = self.find_cells(screen_bgr)
+        if not cells:
+            return {}, 0.0, 0
+
+        crop_x, crop_y, crop_w, crop_h = self._table_crop_box(screen_bgr, cells)
+        if crop_w <= 0 or crop_h <= 0:
+            return {}, 0.0, 0
+
+        table_bgr = screen_bgr[crop_y : crop_y + crop_h, crop_x : crop_x + crop_w]
+        ocr_started = time.perf_counter()
+        detections = self.ocr.read(table_bgr, use_det=True, use_cls=False, text_score=0.3)
+        ocr_ms = self._elapsed_ms(ocr_started)
+
+        mapped: dict[Box, OcrText] = {}
+        for detection in detections:
+            center = self._ocr_box_center(detection.box)
+            if center is None:
+                continue
+            point = (center[0] + crop_x, center[1] + crop_y)
+            for cell_box in cells:
+                if not self._cell_contains_point(cell_box, point):
+                    continue
+                current = mapped.get(cell_box)
+                if current is None or detection.score > current.score:
+                    mapped[cell_box] = detection
+                break
+
+        return mapped, ocr_ms, len(detections)
+
+    @staticmethod
+    def _matches_target_text(candidate_norm: str, target_norm: str, score: float, threshold: float) -> bool:
+        if not candidate_norm or not target_norm:
+            return False
+        if candidate_norm == target_norm:
+            return score >= threshold
+
+        # 输入已经是单个制造商单元格，可以容忍 OCR 在文字前后多识别少量噪声，
+        # 例如“奥迪”被识别成“廣奥迪”。
+        substring_threshold = max(0.55, threshold - 0.20)
+        return len(target_norm) >= 2 and target_norm in candidate_norm and score >= substring_threshold
+
     def find_text(self, target_text: str, *, region=None, threshold: float = 0.75):
         """在当前画面的制造商表格中定位目标文字。"""
         if not self.state.is_running or not target_text:
             return None
         started = time.perf_counter()
         capture_ms = None
+        ocr_ms = None
+        ocr_items = None
         cells_count = 0
         result_text = "miss"
         try:
@@ -247,22 +329,25 @@ class ManufacturerDetector:
             target_norm = self.ocr.normalize_text(target_text)
             cells = self.find_cells(screen_bgr)
             cells_count = len(cells)
+            detected_texts, ocr_ms, ocr_items = self.detect_cell_texts(screen_bgr, cells)
 
             for cell_box in cells:
                 x, y, cell_w, cell_h = cell_box
-                cell = screen_bgr[y : y + cell_h, x : x + cell_w]
-                result = self.ocr.recognize_cell_text(cell, min_score=0.3)
+                result = detected_texts.get(cell_box)
                 if result is None:
                     continue
 
-                if self.ocr.normalize_text(result.text) != target_norm or result.score < threshold:
+                candidate_norm = self.ocr.normalize_text(result.text)
+                candidate_score = float(result.score)
+                if not self._matches_target_text(candidate_norm, target_norm, candidate_score, threshold):
                     continue
 
                 pos = frame.box_center(cell_box)
                 self.last_positions[target_text] = pos
                 self.log(
-                    f"[ManufacturerOCR] 命中: {result.text} (目标:{target_text}) | 分数:{result.score:.3f} "
-                    f"(阈值 {threshold}) | 单元格: x={x}, y={y}, w={cell_w}, h={cell_h}",
+                    f"[ManufacturerOCR] 命中: {result.text} (目标:{target_text}) | "
+                    f"分数:{result.score:.3f} (阈值 {threshold}) | OCR:det-table | "
+                    f"单元格: x={x}, y={y}, w={cell_w}, h={cell_h}",
                     level="debug",
                 )
                 result_text = "hit"
@@ -271,13 +356,15 @@ class ManufacturerDetector:
             return None
         except Exception as e:
             result_text = "error"
-            self.log(f"find_manufacturer_text 异常: {e}", level="warning")
+            self.log(f"find_text 异常: {e}", level="warning")
             return None
         finally:
             self._log_timing(
                 "find_text",
                 started,
                 capture_ms=capture_ms,
+                ocr_ms=ocr_ms,
+                ocr_items=ocr_items,
                 cells=cells_count,
                 result=result_text,
             )

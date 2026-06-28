@@ -25,7 +25,7 @@ class InputActionsService:
         self.save_config = save_config
         self.log = log
         self.ensure_running = ensure_running or (lambda: None)
-        self.keyboard_mouse_controller = KeyboardMouseController(get_game_region)
+        self.keyboard_mouse_controller = KeyboardMouseController(get_game_region, log=log)
         self.controller = self.keyboard_mouse_controller
 
     def set_ensure_running(self, ensure_running: ActionFn) -> None:

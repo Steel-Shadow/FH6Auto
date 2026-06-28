@@ -1,8 +1,8 @@
 from __future__ import annotations
 from collections.abc import Callable
 
-from ..automation.recovery import RecoveryService
-from ..automation.window import GameWindowService
+from ..recovery import RecoveryService
+from ..window import GameWindowService
 from ..backend.state import RuntimeState
 from ..input.actions import InputActionsService
 from ..vision.car_cards import CarCardPageSelector, CarCardSearchOptions

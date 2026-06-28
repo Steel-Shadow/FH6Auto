@@ -4,8 +4,8 @@ import math
 import time
 from collections.abc import Callable
 
-from ..automation.recovery import RecoveryService
-from ..automation.window import GameWindowService
+from ..recovery import RecoveryService
+from ..window import GameWindowService
 from ..backend.config_service import BackendConfigService
 from ..backend.runtime import BackendRuntimeService
 from ..backend.state import RuntimeState
