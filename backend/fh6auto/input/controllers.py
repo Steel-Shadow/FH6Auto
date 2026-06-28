@@ -174,7 +174,6 @@ class KeyboardMouseController:
         if self._key_code(key) is None:
             self._warn_unsupported_key(key)
             return False
-        # pydirectinput.press(interval=...) 的 interval 是按键完成后的间隔，不是按住时长。
         downed = self.key_down(key)
         time.sleep(delay)
         upped = self.key_up(key)

@@ -73,10 +73,7 @@ class RaceFlow:
     # --- 模块：跑图前置与循环跑图 ---
     # ==========================================
     def _wait_for_event_loaded(self, timeout: float = 20.0):
-        return self.image_waits.wait_for_footer_text_ui(
-            "查看赛事信息",
-            region=self.game_window.regions["下"],
-        )
+        return self.image_waits.wait_for_footer_text_ui("查看赛事信息")
 
     def _find_like_author_prompt(self):
         return self.image_matcher.find_any_image_sift(
@@ -214,25 +211,26 @@ class RaceFlow:
         self.input_actions.hw_press("enter")
         sleep(1.0)
 
+        if not self.image_waits.wait_for_footer_text_ui("选择", timeout=15, interval=0.5):
+            self.log("进入车辆选择页后未找到底部“选择”按钮。", level="warning")
+            return False
+
         race_car_options = CarCardSearchOptions(
             card_path=self.RACE_CAR_TEMPLATE,
             label="目标跑图车辆",
             required_tag_path=self.RACE_CAR_FAVORITE_TAG,
             tag_threshold=0.55,
             max_pages=1,
-            page_timeout=2.0,
-            interval=0.25,
         )
         race_car_result = self.car_cards.find(race_car_options)
 
         if not race_car_result:
             self.log("未找到目标跑图车辆，重新选择制造商...", level="debug")
             self.input_actions.hw_press("backspace")
-            sleep(1.2)
+            sleep(1.0)
 
             pos_brand = self.manufacturer.scan_for_text(
                 "斯巴鲁",
-                threshold=0.75,
                 label="刷图车辆制造商",
             )
             if not pos_brand:
@@ -248,8 +246,6 @@ class RaceFlow:
                     required_tag_path=self.RACE_CAR_FAVORITE_TAG,
                     tag_threshold=0.55,
                     max_pages=20,
-                    page_timeout=2.0,
-                    interval=0.25,
                     turn_key_delay=0.08,
                 )
             )
@@ -271,9 +267,7 @@ class RaceFlow:
                 level="debug",
             )
 
-            pos = self.image_waits.wait_for_footer_text_ui(
-                "选择",
-            )
+            pos = self.image_waits.wait_for_footer_text_ui("选择")
 
             if not pos:
                 self.log("未找到'选择'按钮。", level="warning")

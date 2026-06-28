@@ -137,10 +137,6 @@ class ImageCacheService:
             origin=self.capture_offset(capture_region),
         )
 
-    def capture_region(self, region=None, mask_areas=None):
-        """截取指定屏幕区域；未指定时默认截取游戏窗口客户区。"""
-        return self.capture_frame(region, mask_areas=mask_areas).image
-
     def _to_gray_any(self, img):
         if img is None:
             return None

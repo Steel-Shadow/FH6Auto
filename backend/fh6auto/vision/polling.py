@@ -112,37 +112,15 @@ class ImageWaitsService:
             interval=interval,
         )
 
-    def wait_for_menu_text_ui(
-        self,
-        target_text,
-        region=None,
-        timeout: float = 30,
-        interval: float = 0.5,
-        threshold=0.65,
-    ):
-        return self._wait_for(
-            lambda: self.text_detector.find_menu_text_ui(
-                target_text,
-                region=region,
-                threshold=threshold,
-            ),
-            timeout=timeout,
-            interval=interval,
-        )
-
     def wait_for_footer_text_ui(
         self,
         target_text,
-        region=None,
-        threshold=0.65,
         timeout: float = 30,
         interval: float = 0.5,
     ):
         return self._wait_for(
             lambda: self.footer.find_text(
                 target_text,
-                region=region,
-                threshold=threshold,
             ),
             timeout=timeout,
             interval=interval,

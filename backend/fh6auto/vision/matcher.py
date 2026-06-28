@@ -5,6 +5,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 
 import cv2
 import numpy as np
@@ -49,6 +50,7 @@ class ImageMatcherService(VisionTimingMixin):
     """提供当前画面的图像目标匹配，复合目标可使用 OCR 结果作为特征。"""
 
     TIMING_NAME = "Match"
+    CAR_CARD_TITLE_SIMILARITY_THRESHOLD = 0.80
 
     RARITY_WORDS = ("传奇", "史诗", "稀有", "普通")
     TAG_WORDS = ("全新",)
@@ -87,6 +89,12 @@ class ImageMatcherService(VisionTimingMixin):
     @staticmethod
     def _cjk_only(text: str) -> str:
         return "".join(ch for ch in text if "\u4e00" <= ch <= "\u9fff")
+
+    @staticmethod
+    def _text_similarity(left: str, right: str) -> float:
+        if not left or not right:
+            return 0.0
+        return float(SequenceMatcher(None, left, right).ratio())
 
     @staticmethod
     def _box_center(box) -> tuple[float, float] | None:
@@ -571,10 +579,15 @@ class ImageMatcherService(VisionTimingMixin):
             identity_checks += 1
             target_title = self.ocr.normalize_text(target.title)
             candidate_title = self.ocr.normalize_text(candidate.title)
+            title_similarity = self._text_similarity(target_title, candidate_title)
             if (
                 len(target_title) >= 4
                 and len(candidate_title) >= 4
-                and (target_title in candidate_title or candidate_title in target_title)
+                and (
+                    target_title in candidate_title
+                    or candidate_title in target_title
+                    or title_similarity >= self.CAR_CARD_TITLE_SIMILARITY_THRESHOLD
+                )
             ):
                 score += 0.06
             else:
@@ -593,7 +606,7 @@ class ImageMatcherService(VisionTimingMixin):
             return 0.0, tuple(failed)
         return min(1.0, score / possible_score), tuple(failed)
 
-    def _find_car_card_ocr_candidates(
+    def _find_first_car_card_ocr_candidate(
         self,
         card_path,
         screen_bgr,
@@ -605,18 +618,17 @@ class ImageMatcherService(VisionTimingMixin):
         min_score=0.75,
         tag_threshold=0.55,
         target: CarCardSpec | None = None,
-    ) -> list[CarCardOcrCandidate]:
+    ) -> CarCardOcrCandidate | None:
         target = target or self._read_car_card_spec_from_template(card_path)
         if target is None:
-            return []
+            return None
 
         boxes = self._segment_car_card_boxes(screen_bgr)
         if not boxes:
-            return []
+            return None
 
         required_tag_text = self._normalize_tag_text(required_tag_text)
         excluded_tag_text = self._normalize_tag_text(excluded_tag_text)
-        candidates: list[CarCardOcrCandidate] = []
 
         for x, y, w, h in boxes:
             roi = screen_bgr[y : y + h, x : x + w]
@@ -647,25 +659,16 @@ class ImageMatcherService(VisionTimingMixin):
                 tag_threshold=tag_threshold,
             )
             if score >= min_score and not failed:
-                candidates.append(
-                    CarCardOcrCandidate(
-                        box=(x, y, w, h),
-                        pos=(int(x + w // 2), int(y + h // 2)),
-                        spec=spec,
-                        texts=card_texts,
-                        score=score,
-                        failed=failed,
-                    )
+                return CarCardOcrCandidate(
+                    box=(x, y, w, h),
+                    pos=(int(x + w // 2), int(y + h // 2)),
+                    spec=spec,
+                    texts=card_texts,
+                    score=score,
+                    failed=failed,
                 )
 
-        candidates.sort(
-            key=lambda item: self._car_card_column_order(
-                item.box[0],
-                item.box[1],
-                item.score,
-            )
-        )
-        return candidates
+        return None
 
     def find_car_card(
         self,
@@ -678,7 +681,6 @@ class ImageMatcherService(VisionTimingMixin):
         region=None,
         final_threshold=0.78,
         tag_threshold=0.70,
-        max_candidates=80,
         mask_areas=None,
     ):
         if not self.state.is_running:
@@ -703,7 +705,7 @@ class ImageMatcherService(VisionTimingMixin):
                 return None
 
             ocr_started = time.perf_counter()
-            ocr_candidates = self._find_car_card_ocr_candidates(
+            first_ocr_candidate = self._find_first_car_card_ocr_candidate(
                 card_path,
                 screen_bgr,
                 required_tag_path=required_tag_path,
@@ -716,9 +718,9 @@ class ImageMatcherService(VisionTimingMixin):
                 target=target_spec,
             )
             ocr_ms = self._elapsed_ms(ocr_started)
-            candidates_count = len(ocr_candidates)
-            if ocr_candidates:
-                best_ocr = ocr_candidates[: max(1, int(max_candidates))][0]
+            candidates_count = 1 if first_ocr_candidate else 0
+            if first_ocr_candidate:
+                best_ocr = first_ocr_candidate
                 pos = frame.to_screen_point(best_ocr.pos)
                 self.last_positions[card_path] = pos
                 spec = best_ocr.spec

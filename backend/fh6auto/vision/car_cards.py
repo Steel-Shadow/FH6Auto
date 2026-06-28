@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-import time
 
 from ..input.actions import InputActionsService
 from .matcher import ImageMatcherService
@@ -22,13 +21,10 @@ class CarCardSearchOptions:
     region: tuple[int, int, int, int] | None = None
     final_threshold: float = 0.78
     tag_threshold: float = 0.70
-    max_candidates: int = 80
     mask_areas: Sequence[MaskArea] | None = None
     start_page: int = 0
     max_pages: int = 5
     page_step_presses: int = 4
-    page_timeout: float = 1.5
-    interval: float = 0.2
     turn_key: str = "right"
     turn_key_delay: float = 0.06
     turn_pause: float = 0.4
@@ -71,7 +67,18 @@ class CarCardPageSelector:
                 f"扫描{options.label}... (连续未找到: {page_offset}/{max_pages})",
                 level="debug",
             )
-            pos = self._find_on_current_page(options)
+            pos = self.image_matcher.find_car_card(
+                options.card_path,
+                required_tag_path=options.required_tag_path,
+                excluded_tag_path=options.excluded_tag_path,
+                required_tag_text=options.required_tag_text,
+                excluded_tag_text=options.excluded_tag_text,
+                exclude_driving=options.exclude_driving,
+                region=options.region,
+                final_threshold=options.final_threshold,
+                tag_threshold=options.tag_threshold,
+                mask_areas=options.mask_areas,
+            )
             if pos:
                 self.log(f"锁定{options.label}，当前页码: {current_page}", level="debug")
                 return CarCardSearchResult(pos, current_page)
@@ -85,30 +92,6 @@ class CarCardPageSelector:
             current_page += 1
 
         return None
-
-    def _find_on_current_page(self, options: CarCardSearchOptions) -> tuple[int, int] | None:
-        deadline = time.monotonic() + max(0.0, options.page_timeout)
-        while True:
-            pos = self.image_matcher.find_car_card(
-                options.card_path,
-                required_tag_path=options.required_tag_path,
-                excluded_tag_path=options.excluded_tag_path,
-                required_tag_text=options.required_tag_text,
-                excluded_tag_text=options.excluded_tag_text,
-                exclude_driving=options.exclude_driving,
-                region=options.region,
-                final_threshold=options.final_threshold,
-                tag_threshold=options.tag_threshold,
-                max_candidates=options.max_candidates,
-                mask_areas=options.mask_areas,
-            )
-            if pos:
-                return pos
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return None
-            self.sleep(min(options.interval, remaining))
 
     def _turn_page(self, options: CarCardSearchOptions) -> None:
         for _ in range(max(1, int(options.page_step_presses))):

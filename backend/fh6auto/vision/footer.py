@@ -94,16 +94,11 @@ class FooterDetector(VisionTimingMixin):
         self._targets_cache[cache_key] = targets
         return targets
 
-    def _footer_text_regions(self, region):
-        if region is None:
-            full_region = self.game_window.regions.get("全界面")
-            if full_region is None:
-                frame = self.image_cache.capture_frame(None)
-                region = (frame.origin[0], frame.origin[1], frame.width, frame.height)
-            else:
-                region = full_region
+    def _footer_text_regions(self):
+        full_region = self.game_window.regions.get("全界面")
+        assert full_region is not None, "游戏窗口全界面区域未初始化"
 
-        sx, sy, sw, sh = map(int, region)
+        sx, sy, sw, sh = map(int, full_region)
         bottom_h = max(1, int(sh * 0.20))
         bottom_y = sy + sh - bottom_h
         return [("底部提示栏", (sx, bottom_y, sw, bottom_h))]
@@ -120,7 +115,7 @@ class FooterDetector(VisionTimingMixin):
         result_text = "empty"
         try:
             parts: list[str] = []
-            for _, roi in self._footer_text_regions(region):
+            for _, roi in self._footer_text_regions():
                 region_count += 1
                 capture_started = time.perf_counter()
                 frame = self.image_cache.capture_frame(roi)
@@ -168,7 +163,7 @@ class FooterDetector(VisionTimingMixin):
                 result_text = "no_targets"
                 return None
 
-            for roi_name, roi in self._footer_text_regions(region):
+            for roi_name, roi in self._footer_text_regions():
                 region_count += 1
                 capture_started = time.perf_counter()
                 frame = self.image_cache.capture_frame(roi)

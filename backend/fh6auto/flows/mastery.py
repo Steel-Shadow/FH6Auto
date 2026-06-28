@@ -142,12 +142,7 @@ class MasteryFlow:
         self.input_actions.hw_press("enter")
         sleep(2)
 
-        pos_bs = self.image_waits.wait_for_footer_text_ui(
-            "选择",
-            region=self.game_window.regions["下"],
-            timeout=3.0,
-            interval=0.3,
-        )
+        pos_bs = self.image_waits.wait_for_footer_text_ui("选择")
         if not pos_bs:
             self.log("未找到 选择", level="warning")
             return False
@@ -163,9 +158,7 @@ class MasteryFlow:
             self.input_actions.hw_press("backspace")
             sleep(1.0)
 
-            manufacturer_pos = self.manufacturer.scan_for_text(
-                "斯巴鲁", threshold=0.75, label="消耗品制造商"
-            )
+            manufacturer_pos = self.manufacturer.scan_for_text("斯巴鲁", threshold=0.75, label="消耗品制造商")
             if not manufacturer_pos:
                 self.log("选择制造商失败", level="warning")
                 return False
@@ -181,8 +174,6 @@ class MasteryFlow:
                     required_tag_text="全新",
                     max_pages=self.NOT_FOUND_PAGE_LIMIT,
                     start_page=start_page,
-                    page_timeout=1.5,
-                    interval=0.2,
                 )
             )
 
@@ -207,62 +198,43 @@ class MasteryFlow:
             self.input_actions.hw_press("enter")
 
             sleep(10.0)
-            pos_drive = self.image_waits.wait_for_footer_text_ui(
-                "驾驶",
-                region=self.game_window.regions["下"],
-                timeout=10,
-                interval=1.0,
-            )
+            pos_drive = self.image_waits.wait_for_footer_text_ui("驾驶")
             if not pos_drive:
                 self.log("上新车后的检视，底部未找到“驾驶”", level="warning")
                 return False
 
+            # 退出新车检视界面，返回车辆菜单
             self.input_actions.hw_press("esc")
+            sleep(1.5)
+
+            # 点击 升级与调校
+            self.input_actions.hw_press("down")
+            sleep(0.1)
+            self.input_actions.hw_press("enter")
             sleep(1.0)
 
-            pos_sjy = self.image_waits.wait_for_menu_text_ui(
-                "升级与调校",
-                region=self.game_window.regions["左下"],
-            )
-            if not pos_sjy:
-                self.log("找不到升级页面", level="warning")
-                return False
-
-            self.input_actions.game_click(pos_sjy)
-
-            pos_mastery = self.image_waits.wait_for_menu_text_ui(
-                "车辆专精",
-                region=self.game_window.regions["左下"],
-            )
-            if not pos_mastery:
-                self.log("未找到车辆专精", level="warning")
-                return False
-            self.input_actions.game_click(pos_mastery)
+            # 点击 车辆专精
+            for _ in range(7):
+                self.input_actions.hw_press("down")
+                sleep(0.1)
+            self.input_actions.hw_press("enter")
             sleep(1.0)
 
-            pos_exp = self.image_matcher.find_image_sift(
-                "EXPwU.png",
-                region=self.game_window.regions["左"],
-                min_inliers=8,
-            )
-            if pos_exp:
-                self.log("该车辆技能已点过，跳过计数", level="debug")
-            else:
+            self.input_actions.hw_press("enter")
+            sleep(1.2)
+            if self._check_no_skill_points():
+                return finish("技能点不足")
+
+            for dk in self.config.values["skill_dirs"]:
+                self.input_actions.hw_press(dk)
+                sleep(0.2)
                 self.input_actions.hw_press("enter")
                 sleep(1.2)
                 if self._check_no_skill_points():
                     return finish("技能点不足")
 
-                for dk in self.config.values["skill_dirs"]:
-                    self.input_actions.hw_press(dk)
-                    sleep(0.2)
-                    self.input_actions.hw_press("enter")
-                    sleep(1.2)
-                    if self._check_no_skill_points():
-                        return finish("技能点不足")
-
-                self.state.mastery_counter += 1
-                self.state.set_task("熟练度加点", self.state.mastery_counter, effective_target)
+            self.state.mastery_counter += 1
+            self.state.set_task("熟练度加点", self.state.mastery_counter, effective_target)
 
             self.input_actions.hw_press("esc")
             sleep(1.2)

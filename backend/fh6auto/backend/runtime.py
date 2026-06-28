@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-import csv
 from collections.abc import Callable
 from dataclasses import dataclass
 import math
-from pathlib import Path
 import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-import cv2
 from pynput import keyboard
 
 from .config_service import BackendConfigService
 from .state import RuntimeState
 from ..window import GameWindowService
 from ..input.actions import InputActionsService
-from ..paths import APP_DIR
 
 if TYPE_CHECKING:
     from .app import AppFlows
@@ -446,131 +442,18 @@ class BackendRuntimeService:
     def debug(self) -> None:
         is_running = self.state.is_running
         self.state.is_running = True
-        started = time.perf_counter()
+        if not self.game_window.check_and_focus_game():
+            self.log("Debug: 无法定位并聚焦游戏窗口，已中止。", level="warning")
+            return
         try:
-            focus_started = time.perf_counter()
-            self.game_window.check_and_focus_game()
-            focus_ms = (time.perf_counter() - focus_started) * 1000.0
+            # press F3 and debug here
+            flows = self._get_flows()
+            res = flows.remove_car.manufacturer.scan_for_text("斯巴鲁")
+            self.log(res, level="debug")
+            self.input_actions.game_click(res)
 
-            image_cache = self._get_image_cache()
-            manufacturer = self._get_manufacturer()
-            ocr = self._get_ocr()
-
-            capture_started = time.perf_counter()
-            frame = image_cache.capture_frame()
-            screen_bgr = frame.image
-            capture_ms = (time.perf_counter() - capture_started) * 1000.0
-
-            cell_started = time.perf_counter()
-            cells = manufacturer.find_cells(screen_bgr)
-            cell_detect_ms = (time.perf_counter() - cell_started) * 1000.0
-            detected_texts, det_ocr_ms, det_items = manufacturer.detect_cell_texts(screen_bgr, cells)
-
-            output_dir = Path(APP_DIR) / "debug" / "manufacturer"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            stamp = time.strftime("%Y%m%d_%H%M%S")
-            raw_path = output_dir / f"{stamp}_raw.png"
-            boxed_path = output_dir / f"{stamp}_boxed.png"
-            csv_path = output_dir / f"{stamp}_ocr.csv"
-            txt_path = output_dir / f"{stamp}_ocr.txt"
-
-            boxed = screen_bgr.copy()
-            rows = []
-            text_lines = [
-                "Manufacturer OCR debug",
-                f"raw={raw_path}",
-                f"boxed={boxed_path}",
-                f"csv={csv_path}",
-                f"capture_region={frame.region}",
-                f"origin={frame.origin}",
-                f"image={frame.width}x{frame.height}",
-                f"cells={len(cells)}",
-                f"det_items={det_items}",
-                "",
-            ]
-
-            ocr_total_ms = det_ocr_ms
-            for index, cell_box in enumerate(cells, start=1):
-                x, y, cell_w, cell_h = cell_box
-                det_result = detected_texts.get(cell_box)
-
-                det_text = det_result.text if det_result is not None else ""
-                det_score = float(det_result.score) if det_result is not None else 0.0
-                det_norm = ocr.normalize_text(det_text) if det_text else ""
-
-                rows.append(
-                    {
-                        "index": index,
-                        "x": x,
-                        "y": y,
-                        "w": cell_w,
-                        "h": cell_h,
-                        "det_text": det_text,
-                        "det_norm": det_norm,
-                        "det_score": f"{det_score:.4f}",
-                    }
-                )
-                text_lines.append(
-                    f"{index:02d} box=({x},{y},{cell_w},{cell_h}) "
-                    f"det='{det_text}' score={det_score:.3f}"
-                )
-
-                cv2.rectangle(boxed, (x, y), (x + cell_w, y + cell_h), (0, 255, 0), 2)
-                label = str(index)
-                label_origin = (x + 4, max(14, y + 18))
-                cv2.rectangle(boxed, (x + 2, y + 2), (x + 40, y + 24), (0, 0, 0), -1)
-                cv2.putText(
-                    boxed,
-                    label,
-                    label_origin,
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55,
-                    (0, 255, 255),
-                    2,
-                    cv2.LINE_AA,
-                )
-
-            total_ms = (time.perf_counter() - started) * 1000.0
-            text_lines.extend(
-                [
-                    "",
-                    f"focus_ms={focus_ms:.1f}",
-                    f"capture_ms={capture_ms:.1f}",
-                    f"cell_detect_ms={cell_detect_ms:.1f}",
-                    f"det_ocr_ms={det_ocr_ms:.1f}",
-                    f"ocr_ms={ocr_total_ms:.1f}",
-                    f"total_ms={total_ms:.1f}",
-                ]
-            )
-
-            cv2.imwrite(str(raw_path), screen_bgr)
-            cv2.imwrite(str(boxed_path), boxed)
-
-            fieldnames = [
-                "index",
-                "x",
-                "y",
-                "w",
-                "h",
-                "det_text",
-                "det_norm",
-                "det_score",
-            ]
-            with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
-            txt_path.write_text("\n".join(text_lines), encoding="utf-8")
-
-            self.log(
-                "制造商 Debug 完成："
-                f"cells={len(cells)}, focus={focus_ms:.1f}ms, capture={capture_ms:.1f}ms, "
-                f"cell_detect={cell_detect_ms:.1f}ms, det_ocr={det_ocr_ms:.1f}ms, "
-                f"ocr={ocr_total_ms:.1f}ms, total={total_ms:.1f}ms"
-            )
-            self.log(f"制造商 Debug 输出：{boxed_path}；{csv_path}")
         except Exception as e:
-            self.log(f"制造商 Debug 失败: {e}", level="warning")
+            self.log(f"Debug: {e}", level="warning")
         finally:
             self.state.is_running = is_running
 

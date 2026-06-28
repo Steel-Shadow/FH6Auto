@@ -230,6 +230,7 @@ class AppFlows:
             input_actions=services.input_actions,
             footer=services.footer,
             ocr=services.ocr,
+            player_stats=services.player_stats,
             recovery=services.recovery,
             runtime=services.runtime,
             log=log,

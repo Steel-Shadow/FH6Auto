@@ -14,6 +14,7 @@ from ..vision.footer import FooterDetector
 from ..vision.matcher import ImageMatcherService
 from ..vision.ocr import OcrService
 from ..vision.player_stats import PlayerStatsDetector
+
 DEFAULT_OWNED_CAR_SELL_THRESHOLD = 1_000_000
 
 
@@ -31,6 +32,7 @@ class AutoWheelspinFlow:
         input_actions: InputActionsService,
         footer: FooterDetector,
         ocr: OcrService,
+        player_stats: PlayerStatsDetector,
         recovery: RecoveryService,
         runtime: BackendRuntimeService,
         log: Callable[..., None],
@@ -43,6 +45,7 @@ class AutoWheelspinFlow:
         self.input_actions = input_actions
         self.footer = footer
         self.ocr = ocr
+        self.player_stats = player_stats
         self.recovery = recovery
         self.runtime = runtime
         self.log = log
@@ -69,10 +72,7 @@ class AutoWheelspinFlow:
 
     def _detect_owned_car_dialog(self) -> bool:
         try:
-            results = self.ocr.read(
-                self.image_cache.capture_region(self._dialog_region()),
-                text_score=0.25,
-            )
+            results = self.ocr.read(self.image_cache.capture_frame().image)
         except Exception as e:
             self.log(f"读取重复车辆弹窗失败: {e}", level="warning")
             return False
@@ -80,57 +80,11 @@ class AutoWheelspinFlow:
         text = "".join(self.ocr.normalize_text(result.text) for result in results if result.score >= 0.25)
         return "已拥有车辆" in text or "添加至车库" in text
 
-    def _find_sell_price_value(self, threshold=0.25) -> int | None:
-        if not self.state.is_running:
-            return None
-        started = time.perf_counter()
-        capture_ms = None
-        result_text = "miss"
-        try:
-            capture_started = time.perf_counter()
-            x, y, w, h = self.game_window.regions["全界面"]
-            region = (
-                x + int(w * 0.25),
-                y + int(h * 0.12),
-                max(1, int(w * 0.50)),
-                max(1, int(h * 0.76)),
-            )
-            frame = self.image_cache.capture_frame(region)
-            capture_ms = (time.perf_counter() - capture_started) * 1000.0
-            screen_bgr = frame.image
-            if screen_bgr.size == 0:
-                return None
-
-            results = sorted(
-                (result for result in self.ocr.read(screen_bgr, text_score=threshold) if result.score >= threshold),
-                key=lambda result: (
-                    min((point[1] for point in result.box), default=0) if result.box else 0,
-                    min((point[0] for point in result.box), default=0) if result.box else 0,
-                ),
-            )
-            combined_text = "".join(result.text for result in results)
-            value = PlayerStatsDetector.parse_credit_value(combined_text)
-            if value is not None:
-                result_text = "hit"
-                self.log(f"[PriceOCR] 出售价格: CR {value:,} | OCR: {combined_text}", level="debug")
-            return value
-        except Exception as e:
-            result_text = "error"
-            self.log(f"find_sell_price_value 异常: {e}", level="warning")
-            return None
-        finally:
-            self._log_timing(
-                "_find_sell_price_value",
-                started,
-                capture_ms=capture_ms,
-                result=result_text,
-            )
-
     def _read_owned_car_sell_price(self, timeout: float = 1.5) -> int | None:
         deadline = time.time() + max(0.0, timeout)
         while time.time() < deadline:
             self.runtime.ensure_running()
-            price = self._find_sell_price_value()
+            price = self.player_stats.find_sell_price_value(threshold=0.25)
             if price is not None:
                 return price
         return None
@@ -138,7 +92,7 @@ class AutoWheelspinFlow:
     def _sell_owned_car(self) -> None:
         for _ in range(2):
             self.input_actions.hw_press("down", delay=0.08)
-            self.runtime.sleep(0.15)
+            self.runtime.sleep(0.1)
         self.input_actions.hw_press("enter")
 
     def _owned_car_sell_threshold(self) -> int:
@@ -277,7 +231,6 @@ class AutoWheelspinFlow:
                 self.log("检测到抽奖动画，可跳过，按 Enter。", level="debug")
                 self.input_actions.hw_press("enter")
                 last_state_time = time.time()
-                self.runtime.sleep(1.0)
                 continue
 
             elif state == "claim_again":
@@ -296,7 +249,6 @@ class AutoWheelspinFlow:
                 self.log(f"{label} {progress_text}，领取奖励并继续下一次。", level="debug")
                 self.input_actions.hw_press("enter")
                 last_state_time = time.time()
-                self.runtime.sleep(1.5)
                 continue
 
             elif state == "claim":
@@ -312,7 +264,7 @@ class AutoWheelspinFlow:
                         f"{label}机会已用完，当前进度 {completed_count}/{target_count}，领取奖励后结束。", level="debug"
                     )
                 self.input_actions.hw_press("enter")
-                self.runtime.sleep(1.5)
+                self.runtime.sleep(1.0)
                 self._clear_owned_car_dialogs(label, duplicate_popup_limit)
                 return True
 
@@ -320,7 +272,7 @@ class AutoWheelspinFlow:
                 self.log("等待抽奖界面底部提示超时，自动抽奖流程停止。", level="warning")
                 return False
 
-            self.runtime.sleep(0.4)
+            self.runtime.sleep(0.2)
 
         return use_all or completed_count >= target_count
 
