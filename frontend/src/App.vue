@@ -1,5 +1,6 @@
 <script lang="ts" setup>
   import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+  import { useTheme } from 'vuetify'
 
   type DraftValue = string | number | boolean | number[] | undefined
 
@@ -107,6 +108,7 @@
   const errorMessage = ref('')
   const lockLatestLog = ref(true)
   const logBox = ref<HTMLElement | null>(null)
+  const theme = useTheme()
 
   const modules: ModuleOption[] = [
     {
@@ -190,6 +192,10 @@
     return String(state.runtime.loop.total || 0)
   })
 
+  const isDarkTheme = computed(() => theme.global.current.value.dark)
+  const themeButtonIcon = computed(() => (isDarkTheme.value ? 'mdi-weather-sunny' : 'mdi-weather-night'))
+  const themeButtonLabel = computed(() => (isDarkTheme.value ? '切换到亮色主题' : '切换到暗色主题'))
+
   function skillCellFromIndex (index: number): SkillGridPosition | null {
     if (!Number.isInteger(index) || index < 0 || index >= SKILL_GRID_SIZE * SKILL_GRID_SIZE) return null
     return {
@@ -209,9 +215,9 @@
     const start = skillCellFromIndex(SKILL_START_INDEX)
     if (!start) return []
 
-    const cells = Array.from(new Set(value.map(item => Number(item))))
+    const cells = Array.from(new Set(value.map(Number)))
       .filter(index => index !== SKILL_START_INDEX && skillCellFromIndex(index) !== null)
-      .sort((left, right) => left - right)
+      .toSorted((left, right) => left - right)
     const connected = new Set([SKILL_START_INDEX])
     const remaining = new Set(cells)
     let changed = true
@@ -478,7 +484,20 @@
     await setSkillCells([])
   }
 
+  function setTheme (name: 'light' | 'dark') {
+    theme.global.name.value = name
+    window.localStorage.setItem('fh6auto-theme', name)
+  }
+
+  function toggleTheme () {
+    setTheme(isDarkTheme.value ? 'light' : 'dark')
+  }
+
   onMounted(() => {
+    const savedTheme = window.localStorage.getItem('fh6auto-theme')
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      theme.global.name.value = savedTheme
+    }
     refresh()
     window.setInterval(refresh, 1000)
   })
@@ -517,6 +536,14 @@
               <span class="stat-value">{{ elapsedText }}</span>
             </div>
           </div>
+
+          <v-btn
+            :aria-label="themeButtonLabel"
+            :icon="themeButtonIcon"
+            :title="themeButtonLabel"
+            variant="tonal"
+            @click="toggleTheme"
+          />
 
           <v-btn :disabled="busy" variant="tonal" @click="togglePause">
             {{ state.runtime.is_paused ? '继续' : '暂停' }}
