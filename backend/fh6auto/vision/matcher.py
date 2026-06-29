@@ -189,10 +189,19 @@ class ImageMatcherService(VisionTimingMixin):
         mask[bottom_limit:, :] = 0
         mask[:, :list_left_limit] = 0
 
+        # 选中车辆卡会把底部颜色条、荧光选中边框、左侧详情色块粘成一个大连通域。
+        # 这里先提取“足够长的水平色条”，再找轮廓，避免直接用外部连通域时漏掉选中卡。
+        horizontal_kernel_w = max(75, int(screen_w * 0.048))
         mask = cv2.morphologyEx(
             mask,
             cv2.MORPH_OPEN,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+            cv2.getStructuringElement(cv2.MORPH_RECT, (horizontal_kernel_w, 3)),
+            iterations=1,
+        )
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (max(7, int(screen_w * 0.005)), 3)),
             iterations=1,
         )
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
