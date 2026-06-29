@@ -183,7 +183,7 @@ class OcrService(VisionTimingMixin):
             self._reads_since_gc = 0
         return should_gc
 
-    def read(self, img: np.ndarray | str | Path, *, use_det=True, use_cls=True, text_score=0.5) -> list[OcrText]:
+    def read(self, img: np.ndarray | str | Path, *, use_det=True, use_cls=False, text_score=0.5) -> list[OcrText]:
         should_gc = False
         started = time.perf_counter()
         with self._lock:

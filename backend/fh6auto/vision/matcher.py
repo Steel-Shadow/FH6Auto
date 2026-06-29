@@ -81,6 +81,7 @@ class ImageMatcherService(VisionTimingMixin):
         self.last_positions: dict[str, tuple[int, int]] = {}
         self.sift_feature_cache = {}
         self._tag_contour_cache: dict[str, tuple[np.ndarray, tuple[int, int, int, int]] | None] = {}
+        self._car_card_spec_cache: dict[tuple[str, float, int], CarCardSpec | None] = {}
 
     @staticmethod
     def _crop_ratio(img, x1, y1, x2, y2):
@@ -624,7 +625,85 @@ class ImageMatcherService(VisionTimingMixin):
             )
         return texts
 
+    def _ocr_texts_for_box_union(
+        self,
+        screen_bgr,
+        boxes: tuple[tuple[int, int, int, int], ...],
+    ) -> tuple[CardText, ...]:
+        if screen_bgr is None or screen_bgr.size == 0 or not boxes:
+            return ()
+
+        screen_h, screen_w = screen_bgr.shape[:2]
+        left = max(0, min(x for x, _, _, _ in boxes))
+        top = max(0, min(y for _, y, _, _ in boxes))
+        right = min(screen_w, max(x + w for x, _, w, _ in boxes))
+        bottom = min(screen_h, max(y + h for _, y, _, h in boxes))
+        if right <= left or bottom <= top:
+            return ()
+
+        width = right - left
+        height = bottom - top
+        pad_x = max(6, int(round(width * 0.015)))
+        pad_y = max(6, int(round(height * 0.015)))
+        left = max(0, left - pad_x)
+        top = max(0, top - pad_y)
+        right = min(screen_w, right + pad_x)
+        bottom = min(screen_h, bottom + pad_y)
+
+        roi = screen_bgr[top:bottom, left:right]
+        if roi.size == 0:
+            return ()
+
+        texts = self._ocr_texts_for_image(roi)
+        return tuple(
+            CardText(
+                text=item.text,
+                normalized=item.normalized,
+                score=item.score,
+                center=(item.center[0] + left, item.center[1] + top),
+            )
+            for item in texts
+        )
+
+    @staticmethod
+    def _texts_inside_box(
+        texts: tuple[CardText, ...],
+        box: tuple[int, int, int, int],
+    ) -> tuple[CardText, ...]:
+        x, y, w, h = box
+        margin_x = max(2, int(round(w * 0.02)))
+        margin_y = max(2, int(round(h * 0.02)))
+        left = x - margin_x
+        top = y - margin_y
+        right = x + w + margin_x
+        bottom = y + h + margin_y
+
+        output: list[CardText] = []
+        for item in texts:
+            center_x, center_y = item.center
+            if not (left <= center_x <= right and top <= center_y <= bottom):
+                continue
+            output.append(
+                CardText(
+                    text=item.text,
+                    normalized=item.normalized,
+                    score=item.score,
+                    center=(center_x - x, center_y - y),
+                )
+            )
+        return tuple(output)
+
     def _read_car_card_spec_from_template(self, card_path) -> CarCardSpec | None:
+        actual_path = get_img_path(card_path)
+        cache_key = None
+        try:
+            stat = os.stat(actual_path)
+            cache_key = (str(actual_path), float(stat.st_mtime), int(stat.st_size))
+            if cache_key in self._car_card_spec_cache:
+                return self._car_card_spec_cache[cache_key]
+        except OSError:
+            pass
+
         template_orig, _ = self.image_cache.load_template(card_path)
         if template_orig is None:
             return None
@@ -632,7 +711,10 @@ class ImageMatcherService(VisionTimingMixin):
         texts = self._ocr_texts_for_image(template_orig)
         if not texts:
             return None
-        return self._parse_car_card_spec(texts)
+        spec = self._parse_car_card_spec(texts)
+        if cache_key is not None:
+            self._car_card_spec_cache[cache_key] = spec
+        return spec
 
     def _normalize_tag_text(self, tag_text) -> str | None:
         if not tag_text:
@@ -1036,12 +1118,16 @@ class ImageMatcherService(VisionTimingMixin):
     ) -> CarCardOcrCandidate | None:
         required_tag_text = self._normalize_tag_text(required_tag_text)
         excluded_tag_text = self._normalize_tag_text(excluded_tag_text)
+        boxes = tuple(boxes)
+        screen_texts = self._ocr_texts_for_box_union(screen_bgr, boxes)
+        if not screen_texts:
+            return None
 
         for x, y, w, h in boxes:
             roi = screen_bgr[y : y + h, x : x + w]
             if exclude_driving and self._has_driving_badge(roi):
                 continue
-            card_texts = tuple(self._ocr_texts_for_image(roi))
+            card_texts = self._texts_inside_box(screen_texts, (x, y, w, h))
             if not card_texts:
                 continue
 
@@ -1093,9 +1179,14 @@ class ImageMatcherService(VisionTimingMixin):
         required_new_text = self._normalize_tag_text("全新")
         excluded_new_text = self._normalize_tag_text("全新")
 
+        boxes = tuple(boxes)
+        screen_texts = self._ocr_texts_for_box_union(screen_bgr, boxes)
+        if not screen_texts:
+            return None
+
         for x, y, w, h in boxes:
             roi = screen_bgr[y : y + h, x : x + w]
-            card_texts = tuple(self._ocr_texts_for_image(roi))
+            card_texts = self._texts_inside_box(screen_texts, (x, y, w, h))
             if not card_texts:
                 continue
 
