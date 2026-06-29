@@ -147,6 +147,55 @@ class ImageMatcherService(VisionTimingMixin):
         return float(np.median(diffs))
 
     @staticmethod
+    def _expand_axis_positions(
+        values,
+        *,
+        expected_count: int,
+        pitch: float | None,
+        lower_limit: float,
+        upper_limit: float,
+    ) -> list[int]:
+        positions = sorted(float(value) for value in values)
+        if not positions or expected_count <= 0:
+            return []
+
+        if pitch is None or pitch <= 0:
+            return [int(round(value)) for value in positions[:expected_count]]
+
+        expanded = [positions[0]]
+        for value in positions[1:]:
+            while value - expanded[-1] > pitch * 1.50 and len(expanded) < expected_count:
+                expanded.append(expanded[-1] + pitch)
+            expanded.append(value)
+
+        while len(expanded) < expected_count and expanded[0] - pitch >= lower_limit:
+            expanded.insert(0, expanded[0] - pitch)
+
+        while len(expanded) < expected_count and expanded[-1] + pitch <= upper_limit:
+            expanded.append(expanded[-1] + pitch)
+
+        while len(expanded) < expected_count and expanded[0] - pitch >= 0:
+            expanded.insert(0, expanded[0] - pitch)
+
+        while len(expanded) < expected_count:
+            expanded.append(expanded[-1] + pitch)
+
+        expanded = sorted(expanded)
+        if len(expanded) > expected_count:
+            best_start = 0
+            best_score = float("inf")
+            source = positions
+            for start in range(len(expanded) - expected_count + 1):
+                window = expanded[start : start + expected_count]
+                score = sum(min(abs(pos - src) for pos in window) for src in source)
+                if score < best_score:
+                    best_score = score
+                    best_start = start
+            expanded = expanded[best_start : best_start + expected_count]
+
+        return [int(round(value)) for value in expanded]
+
+    @staticmethod
     def _looks_like_car_card(roi) -> bool:
         """判断一个局部框是否像车辆卡片。
 
@@ -328,6 +377,158 @@ class ImageMatcherService(VisionTimingMixin):
                 boxes.append((x, y, w, h))
 
         boxes.sort(key=lambda item: self._car_card_column_order(item[0], item[1], item[2] * item[3]))
+        deduped = []
+        for box in boxes:
+            x, y, w, h = box
+            center = (x + w / 2, y + h / 2)
+            if any(
+                abs(center[0] - (bx + bw / 2)) < card_w * 0.20
+                and abs(center[1] - (by + bh / 2)) < card_h * 0.20
+                for bx, by, bw, bh in deduped
+            ):
+                continue
+            deduped.append(box)
+        return deduped
+
+    @staticmethod
+    def _looks_like_collection_car_card(roi) -> bool:
+        """判断一个局部框是否像“车辆收藏”页卡片。
+
+        车辆收藏页背景固定为蓝绿色，卡片主体是稳定的浅色块；这里只用于该页面的专用分割，
+        不复用到背景会动态变化的“我的车辆”页面。
+        """
+        if roi is None or roi.size == 0:
+            return False
+
+        h, w = roi.shape[:2]
+        if h < 90 or w < 120:
+            return False
+
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
+        value = hsv[:, :, 2]
+        card_bg_ratio = np.count_nonzero((saturation <= 95) & (value >= 145)) / max(1, saturation.size)
+        if card_bg_ratio < 0.42:
+            return False
+
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        dark_ratio = np.count_nonzero(gray <= 80) / max(1, gray.size)
+        return bool(dark_ratio >= 0.015)
+
+    def _find_collection_car_card_rarity_tags(self, screen_bgr):
+        screen_h, screen_w = screen_bgr.shape[:2]
+        hsv = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
+        value = hsv[:, :, 2]
+        mask = np.where((saturation >= 70) & (value >= 120), 255, 0).astype(np.uint8)
+
+        mask[: int(screen_h * 0.18), :] = 0
+        mask[int(screen_h * 0.92) :, :] = 0
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (9, 3)),
+            iterations=1,
+        )
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (7, 3)),
+            iterations=1,
+        )
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        min_tag_w = max(45, int(screen_w * 0.025))
+        max_tag_w = max(120, int(screen_w * 0.080))
+        min_tag_h = max(12, int(screen_h * 0.012))
+        max_tag_h = max(28, int(screen_h * 0.038))
+
+        tags = []
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if not (min_tag_w <= w <= max_tag_w and min_tag_h <= h <= max_tag_h):
+                continue
+
+            aspect = w / h if h else 0
+            if not 2.2 <= aspect <= 6.0:
+                continue
+
+            area_ratio = cv2.contourArea(contour) / float(w * h)
+            if area_ratio < 0.55:
+                continue
+
+            tags.append((x, y, w, h))
+
+        return sorted(tags, key=lambda item: (item[1], item[0]))
+
+    def _segment_collection_car_card_boxes(self, screen_bgr):
+        screen_h, screen_w = screen_bgr.shape[:2]
+        tags = self._find_collection_car_card_rarity_tags(screen_bgr)
+        if not tags:
+            return []
+
+        fallback_card_w = max(180, int(round(screen_w * 0.17)))
+        fallback_card_h = max(150, int(round(screen_h * 0.23)))
+        tag_row_tolerance = max(8, int(screen_h * 0.025))
+        tag_col_tolerance = max(10, int(fallback_card_w * 0.18))
+
+        detected_row_tops = self._cluster_axis_positions([y for _, y, _, _ in tags], tag_row_tolerance)
+        detected_col_lefts = self._cluster_axis_positions([x for x, _, _, _ in tags], tag_col_tolerance)
+        row_pitch = self._median_step(
+            detected_row_tops,
+            min_step=fallback_card_h * 0.65,
+            max_step=fallback_card_h * 1.45,
+        )
+        col_pitch = self._median_step(
+            detected_col_lefts,
+            min_step=fallback_card_w * 0.65,
+            max_step=fallback_card_w * 1.45,
+        )
+
+        card_w = fallback_card_w
+        if col_pitch is not None:
+            card_w = int(round(min(fallback_card_w * 1.20, max(fallback_card_w * 0.75, col_pitch * 0.98))))
+
+        card_h = fallback_card_h
+        if row_pitch is not None:
+            card_h = int(round(min(fallback_card_h * 1.15, max(fallback_card_h * 0.70, row_pitch * 0.98))))
+
+        left_pad = max(5, int(round(card_w * 0.035)))
+        top_pad = max(4, int(round(card_h * 0.035)))
+        tag_x_lower_limit = int(screen_w * 0.04)
+        tag_y_lower_limit = int(screen_h * 0.18)
+        tag_x_upper_limit = max(tag_x_lower_limit, screen_w - card_w + left_pad)
+        tag_y_upper_limit = max(tag_y_lower_limit, screen_h - card_h + top_pad)
+        col_lefts = self._expand_axis_positions(
+            detected_col_lefts,
+            expected_count=5,
+            pitch=col_pitch,
+            lower_limit=tag_x_lower_limit,
+            upper_limit=tag_x_upper_limit,
+        )
+        row_tops = self._expand_axis_positions(
+            detected_row_tops,
+            expected_count=3,
+            pitch=row_pitch,
+            lower_limit=tag_y_lower_limit,
+            upper_limit=tag_y_upper_limit,
+        )
+
+        boxes = []
+        for tag_y in row_tops:
+            for tag_x in col_lefts:
+                x = max(0, int(round(tag_x - left_pad)))
+                y = max(0, int(round(tag_y - top_pad)))
+                w = min(card_w, screen_w - x)
+                h = min(card_h, screen_h - y)
+                if w < card_w * 0.75 or h < card_h * 0.75:
+                    continue
+
+                roi = screen_bgr[y : y + h, x : x + w]
+                if self._looks_like_collection_car_card(roi):
+                    boxes.append((x, y, w, h))
+
+        boxes.sort(key=lambda item: (item[1], item[0], -(item[2] * item[3])))
         deduped = []
         for box in boxes:
             x, y, w, h = box
@@ -783,6 +984,56 @@ class ImageMatcherService(VisionTimingMixin):
         if not boxes:
             return None
 
+        return self._find_first_car_card_ocr_candidate_in_boxes(
+            boxes,
+            screen_bgr,
+            target,
+            required_tag_path=required_tag_path,
+            excluded_tag_path=excluded_tag_path,
+            required_tag_text=required_tag_text,
+            excluded_tag_text=excluded_tag_text,
+            exclude_driving=exclude_driving,
+            min_score=min_score,
+            tag_threshold=tag_threshold,
+        )
+
+    def _find_first_collection_car_card_ocr_candidate(
+        self,
+        card_path,
+        screen_bgr,
+        min_score=0.75,
+        tag_threshold=0.55,
+        target: CarCardSpec | None = None,
+    ) -> CarCardOcrCandidate | None:
+        target = target or self._read_car_card_spec_from_template(card_path)
+        if target is None:
+            return None
+
+        boxes = self._segment_collection_car_card_boxes(screen_bgr)
+        if not boxes:
+            return None
+
+        return self._find_first_car_card_ocr_candidate_in_boxes(
+            boxes,
+            screen_bgr,
+            target,
+            min_score=min_score,
+            tag_threshold=tag_threshold,
+        )
+
+    def _find_first_car_card_ocr_candidate_in_boxes(
+        self,
+        boxes,
+        screen_bgr,
+        target: CarCardSpec,
+        required_tag_path=None,
+        excluded_tag_path=None,
+        required_tag_text=None,
+        excluded_tag_text=None,
+        exclude_driving=False,
+        min_score=0.75,
+        tag_threshold=0.55,
+    ) -> CarCardOcrCandidate | None:
         required_tag_text = self._normalize_tag_text(required_tag_text)
         excluded_tag_text = self._normalize_tag_text(excluded_tag_text)
 
@@ -970,6 +1221,87 @@ class ImageMatcherService(VisionTimingMixin):
                 capture_ms=capture_ms,
                 ocr_ms=ocr_ms,
                 action=action,
+                result=result_text,
+            )
+
+    def find_collection_car_card(
+        self,
+        card_path,
+        region=None,
+        final_threshold=0.78,
+        tag_threshold=0.70,
+        mask_areas=None,
+    ):
+        if not self.state.is_running:
+            return None
+
+        started = time.perf_counter()
+        capture_ms = None
+        ocr_ms = None
+        candidates_count = 0
+        result_text = "miss"
+        method = "-"
+        try:
+            capture_started = time.perf_counter()
+            frame = self.image_cache.capture_frame(region, mask_areas=mask_areas)
+            capture_ms = self._elapsed_ms(capture_started)
+            screen_bgr = frame.image
+
+            target_spec = self._read_car_card_spec_from_template(card_path)
+            if target_spec is None:
+                result_text = "target_spec_missing"
+                self.log(f"[CollectionCardOCR] 无法从参考图读取目标车辆字段: {card_path}", level="debug")
+                return None
+
+            ocr_started = time.perf_counter()
+            first_ocr_candidate = self._find_first_collection_car_card_ocr_candidate(
+                card_path,
+                screen_bgr,
+                min_score=max(0.75, min(float(final_threshold), 0.85)),
+                tag_threshold=min(float(tag_threshold), 0.55),
+                target=target_spec,
+            )
+            ocr_ms = self._elapsed_ms(ocr_started)
+            candidates_count = 1 if first_ocr_candidate else 0
+            if first_ocr_candidate:
+                best_ocr = first_ocr_candidate
+                pos = frame.to_screen_point(best_ocr.pos)
+                self.last_positions[card_path] = pos
+                spec = best_ocr.spec
+                self.log(
+                    f"[CollectionCardOCR] 锁定: {card_path} | 综合:{best_ocr.score:.3f} | "
+                    f"车型:{spec.title or '-'} | 制造商:{spec.manufacturer or '-'} | 稀有度:{spec.rarity or '-'} | "
+                    f"PI:{spec.car_class or '-'} {spec.pi or '-'} | 年份:{spec.year or '-'} | "
+                    f"全新:{'是' if spec.is_new else '否'}",
+                    level="debug",
+                )
+                result_text = "hit"
+                method = "ocr"
+                return pos
+
+            result_text = "ocr_miss"
+            self.log(
+                f"[CollectionCardOCR] 未命中: {card_path} | 目标字段: "
+                f"车型={target_spec.title or '-'}, 制造商={target_spec.manufacturer or '-'}, "
+                f"稀有度={target_spec.rarity or '-'}, "
+                f"PI={target_spec.car_class or '-'} {target_spec.pi or '-'}, "
+                f"年份={target_spec.year or '-'}, 全新={'是' if target_spec.is_new else '否'}",
+                level="debug",
+            )
+            return None
+
+        except Exception as e:
+            result_text = "error"
+            self.log(f"find_collection_car_card 异常: {e}", level="warning")
+            return None
+        finally:
+            self._log_timing(
+                "find_collection_car_card",
+                started,
+                capture_ms=capture_ms,
+                ocr_ms=ocr_ms,
+                candidates=candidates_count,
+                method=method,
                 result=result_text,
             )
 

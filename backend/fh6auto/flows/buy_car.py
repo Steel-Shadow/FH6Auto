@@ -151,7 +151,7 @@ class BuyCarFlow:
         self.input_actions.hw_press("down")
         sleep(0.4)
 
-        pos_22b = self.image_matcher.find_car_card(
+        pos_22b = self.image_matcher.find_collection_car_card(
             "consumablecar.png",
         )
         if not pos_22b:
