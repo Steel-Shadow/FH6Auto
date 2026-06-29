@@ -24,12 +24,12 @@
     "next_5": 1,
     "global_loops": 10,
     "global_loop_infinite": false,
-    "skill_dirs": [
-        "right",
-        "up",
-        "up",
-        "up",
-        "left"
+    "skill_cells": [
+        0,
+        1,
+        5,
+        9,
+        13
     ],
     "share_code": "659086805",
     "auto_restart": true,

@@ -91,35 +91,42 @@ class BackendConfigService:
                 normalized[key] = bool(value)
             elif key in string_keys:
                 normalized[key] = str(value).lower() if key == "log_level" else str(value)
-            elif key == "skill_dirs":
-                normalized[key] = self._valid_skill_dirs(value)
+            elif key == "skill_cells":
+                normalized[key] = self._valid_skill_cells(value)
         return normalized
 
-    def _valid_skill_dirs(self, value: Any) -> list[str]:
+    def _valid_skill_cells(self, value: Any) -> list[int]:
         if not isinstance(value, list):
-            return list(self.values.get("skill_dirs", []))
+            return list(self.values.get("skill_cells", []))
 
-        valid: list[str] = []
-        row, col = 3, 0
-        visited = {(row, col)}
+        cells: list[int] = []
+        seen: set[int] = set()
         for item in value:
-            direction = str(item)
-            if direction == "up":
-                row -= 1
-            elif direction == "down":
-                row += 1
-            elif direction == "left":
-                col -= 1
-            elif direction == "right":
-                col += 1
-            else:
+            try:
+                index = int(item)
+            except Exception:
                 continue
+            if not (0 <= index < 16) or index == 12 or index in seen:
+                continue
+            seen.add(index)
+            cells.append(index)
 
-            if not (0 <= row < 4 and 0 <= col < 4):
+        connected = {12}
+        remaining = set(cells)
+        while True:
+            added: set[int] = set()
+            for index in remaining:
+                if any(self._is_adjacent_skill_cell(index, connected_index) for connected_index in connected):
+                    added.add(index)
+            if not added:
                 break
-            if (row, col) in visited:
-                break
+            connected.update(added)
+            remaining.difference_update(added)
 
-            visited.add((row, col))
-            valid.append(direction)
-        return valid
+        return sorted(index for index in cells if index in connected)
+
+    @staticmethod
+    def _is_adjacent_skill_cell(left: int, right: int) -> bool:
+        left_row, left_col = divmod(left, 4)
+        right_row, right_col = divmod(right, 4)
+        return abs(left_row - right_row) + abs(left_col - right_col) == 1

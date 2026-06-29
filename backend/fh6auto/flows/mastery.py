@@ -15,6 +15,8 @@ from ..vision.polling import ImageWaitsService
 
 class MasteryFlow:
     NOT_FOUND_PAGE_LIMIT = 5
+    SKILL_GRID_SIZE = 4
+    SKILL_START_CELL = 12
 
     def __init__(
         self,
@@ -48,6 +50,8 @@ class MasteryFlow:
             sleep=self.sleep,
             log=self.log,
         )
+        self._skill_order_cache_key: tuple[int, ...] | None = None
+        self._skill_order_cache: list[int] = []
 
     def _skill_points_per_car(self) -> int:
         raw_points = self.config.values.get("calc_c", "30")
@@ -74,6 +78,129 @@ class MasteryFlow:
             return True
         else:
             return False
+
+    @classmethod
+    def _skill_cell_position(cls, cell: int) -> tuple[int, int]:
+        return divmod(cell, cls.SKILL_GRID_SIZE)
+
+    @classmethod
+    def _skill_cell_distance(cls, left: int, right: int) -> int:
+        left_row, left_col = cls._skill_cell_position(left)
+        right_row, right_col = cls._skill_cell_position(right)
+        return abs(left_row - right_row) + abs(left_col - right_col)
+
+    @classmethod
+    def _is_adjacent_skill_cell(cls, left: int, right: int) -> bool:
+        return cls._skill_cell_distance(left, right) == 1
+
+    def _skill_cells(self) -> list[int]:
+        raw_cells = self.config.values.get("skill_cells", [])
+        if not isinstance(raw_cells, list):
+            return []
+
+        cells: list[int] = []
+        seen: set[int] = set()
+        for item in raw_cells:
+            try:
+                cell = int(item)
+            except Exception:
+                continue
+            if not (0 <= cell < self.SKILL_GRID_SIZE * self.SKILL_GRID_SIZE):
+                continue
+            if cell == self.SKILL_START_CELL or cell in seen:
+                continue
+            seen.add(cell)
+            cells.append(cell)
+
+        connected = {self.SKILL_START_CELL}
+        remaining = set(cells)
+        while True:
+            added = {
+                cell
+                for cell in remaining
+                if any(self._is_adjacent_skill_cell(cell, connected_cell) for connected_cell in connected)
+            }
+            if not added:
+                break
+            connected.update(added)
+            remaining.difference_update(added)
+
+        return sorted(cell for cell in cells if cell in connected)
+
+    def _shortest_skill_cell_order(self, cells: list[int]) -> list[int]:
+        if not cells:
+            return []
+
+        total_cells = len(cells)
+        start_slot = total_cells
+        full_mask = (1 << total_cells) - 1
+        infinity = 10**9
+        dp: dict[tuple[int, int], int] = {(0, start_slot): 0}
+        parent: dict[tuple[int, int], tuple[int, int]] = {}
+
+        for mask in range(1 << total_cells):
+            purchased_cells = [self.SKILL_START_CELL] + [
+                cell for index, cell in enumerate(cells) if mask & (1 << index)
+            ]
+            for last_slot in range(total_cells + 1):
+                current_cost = dp.get((mask, last_slot))
+                if current_cost is None:
+                    continue
+
+                current_cell = self.SKILL_START_CELL if last_slot == start_slot else cells[last_slot]
+                for next_slot, next_cell in enumerate(cells):
+                    if mask & (1 << next_slot):
+                        continue
+                    if not any(self._is_adjacent_skill_cell(next_cell, purchased) for purchased in purchased_cells):
+                        continue
+
+                    next_mask = mask | (1 << next_slot)
+                    next_state = (next_mask, next_slot)
+                    next_cost = current_cost + self._skill_cell_distance(current_cell, next_cell)
+                    if next_cost >= dp.get(next_state, infinity):
+                        continue
+
+                    dp[next_state] = next_cost
+                    parent[next_state] = (mask, last_slot)
+
+        end_state = min(
+            ((full_mask, last_slot) for last_slot in range(total_cells)),
+            key=lambda state: dp.get(state, infinity),
+            default=None,
+        )
+        if end_state is None or dp.get(end_state, infinity) >= infinity:
+            return []
+
+        order: list[int] = []
+        state = end_state
+        while state != (0, start_slot):
+            _, last_slot = state
+            order.append(cells[last_slot])
+            state = parent[state]
+        order.reverse()
+        return order
+
+    def _cached_skill_cell_order(self, cells: list[int]) -> tuple[list[int], bool]:
+        cache_key = tuple(cells)
+        if self._skill_order_cache_key == cache_key:
+            return list(self._skill_order_cache), False
+
+        order = self._shortest_skill_cell_order(cells)
+        self._skill_order_cache_key = cache_key
+        self._skill_order_cache = list(order)
+        return order, True
+
+    def _movement_keys_between_skill_cells(self, source: int, target: int) -> list[str]:
+        source_row, source_col = self._skill_cell_position(source)
+        target_row, target_col = self._skill_cell_position(target)
+        keys: list[str] = []
+
+        vertical_key = "up" if target_row < source_row else "down"
+        keys.extend([vertical_key] * abs(target_row - source_row))
+
+        horizontal_key = "left" if target_col < source_col else "right"
+        keys.extend([horizontal_key] * abs(target_col - source_col))
+        return keys
 
     def _enter_consumable_manufacturer_list(self) -> bool:
         sleep = self.sleep
@@ -160,18 +287,28 @@ class MasteryFlow:
         self.input_actions.hw_press("enter")
         sleep(1.0)
 
+        skill_cells = self._skill_cells()
+        skill_order, skill_order_recalculated = self._cached_skill_cell_order(skill_cells)
+        if skill_order_recalculated and len(skill_order) < len(skill_cells):
+            self.log("技能路径中存在无法连通的格子，已跳过无法规划的部分。", level="warning")
+        if skill_order_recalculated:
+            self.log(f"技能加点位置: {skill_cells}，最短执行顺序: {skill_order}", level="debug")
+
         self.input_actions.hw_press("enter")
         sleep(1.2)
         if self._check_no_skill_points():
             return "技能点不足"
 
-        for dk in self.config.values["skill_dirs"]:
-            self.input_actions.hw_press(dk)
-            sleep(0.2)
+        current_cell = self.SKILL_START_CELL
+        for target_cell in skill_order:
+            for key in self._movement_keys_between_skill_cells(current_cell, target_cell):
+                self.input_actions.hw_press(key)
+                sleep(0.2)
             self.input_actions.hw_press("enter")
             sleep(1.2)
             if self._check_no_skill_points():
                 return "技能点不足"
+            current_cell = target_cell
 
         self.state.mastery_counter += 1
         self.state.set_task("加点&删车", self.state.mastery_counter, effective_target)

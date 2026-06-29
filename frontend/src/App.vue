@@ -1,8 +1,7 @@
 <script lang="ts" setup>
   import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 
-  type Direction = 'up' | 'down' | 'left' | 'right'
-  type DraftValue = string | number | boolean | Direction[] | undefined
+  type DraftValue = string | number | boolean | number[] | undefined
 
   interface DraftConfig {
     [key: string]: DraftValue
@@ -14,7 +13,7 @@
     normal_wheelspin_use_all?: boolean
     restart_cmd?: string
     share_code?: string
-    skill_dirs?: Direction[]
+    skill_cells?: number[]
     super_wheelspin_use_all?: boolean
     wheelspin_sell_threshold?: number
     wheelspin_use_all?: boolean
@@ -61,8 +60,14 @@
     config: DraftConfig
   }
 
-  interface SkillDirsResponse {
-    skill_dirs: Direction[]
+  interface SkillCellsResponse {
+    skill_cells: number[]
+  }
+
+  interface SkillGridPosition {
+    col: number
+    index: number
+    row: number
   }
 
   interface SkillGridCell {
@@ -76,6 +81,9 @@
     pathIndex: number
     row: number
   }
+
+  const SKILL_GRID_SIZE = 4
+  const SKILL_START_INDEX = 12
 
   const state = reactive<AppState>({
     version: '',
@@ -182,65 +190,96 @@
     return String(state.runtime.loop.total || 0)
   })
 
-  const skillPath = computed(() => {
-    const path = [{ row: 3, col: 0 }]
-    const visited = new Set(['3:0'])
-    let row = 3
-    let col = 0
-
-    for (const direction of draft.skill_dirs || []) {
-      if (direction === 'up') row -= 1
-      if (direction === 'down') row += 1
-      if (direction === 'left') col -= 1
-      if (direction === 'right') col += 1
-
-      if (row < 0 || row > 3 || col < 0 || col > 3) break
-
-      const key = `${row}:${col}`
-      if (visited.has(key)) break
-      visited.add(key)
-      path.push({ row, col })
+  function skillCellFromIndex (index: number): SkillGridPosition | null {
+    if (!Number.isInteger(index) || index < 0 || index >= SKILL_GRID_SIZE * SKILL_GRID_SIZE) return null
+    return {
+      col: index % SKILL_GRID_SIZE,
+      index,
+      row: Math.floor(index / SKILL_GRID_SIZE),
     }
-    return path
+  }
+
+  function isAdjacentSkillCell (left: SkillGridPosition, right: SkillGridPosition) {
+    return Math.abs(left.row - right.row) + Math.abs(left.col - right.col) === 1
+  }
+
+  function normalizeSkillCellIndexes (value: unknown): number[] {
+    if (!Array.isArray(value)) return []
+
+    const start = skillCellFromIndex(SKILL_START_INDEX)
+    if (!start) return []
+
+    const cells = Array.from(new Set(value.map(item => Number(item))))
+      .filter(index => index !== SKILL_START_INDEX && skillCellFromIndex(index) !== null)
+      .sort((left, right) => left - right)
+    const connected = new Set([SKILL_START_INDEX])
+    const remaining = new Set(cells)
+    let changed = true
+
+    while (changed) {
+      changed = false
+      for (const index of Array.from(remaining)) {
+        const cell = skillCellFromIndex(index)
+        if (!cell) continue
+        const canConnect = Array.from(connected).some(connectedIndex => {
+          const connectedCell = skillCellFromIndex(connectedIndex)
+          return connectedCell ? isAdjacentSkillCell(connectedCell, cell) : false
+        })
+        if (!canConnect) continue
+
+        connected.add(index)
+        remaining.delete(index)
+        changed = true
+      }
+    }
+
+    return cells.filter(index => connected.has(index))
+  }
+
+  const selectedSkillCells = computed(() => {
+    return normalizeSkillCellIndexes(draft.skill_cells)
+  })
+
+  const skillPath = computed<SkillGridPosition[]>(() => {
+    return [SKILL_START_INDEX, ...selectedSkillCells.value]
+      .map(index => skillCellFromIndex(index))
+      .filter((cell): cell is SkillGridPosition => cell !== null)
   })
 
   const skillGridCells = computed<SkillGridCell[]>(() => {
-    const pathIndexByCell = new Map(skillPath.value.map((cell, index) => [`${cell.row}:${cell.col}`, index]))
-    const current = skillPath.value.at(-1) || { row: 3, col: 0 }
+    const pathIndexByCell = new Map(skillPath.value.map((cell, index) => [cell.index, index]))
 
-    return Array.from({ length: 16 }, (_, index) => {
-      const row = Math.floor(index / 4)
-      const col = index % 4
-      const key = `${row}:${col}`
-      const pathIndex = pathIndexByCell.get(key) ?? -1
+    return Array.from({ length: SKILL_GRID_SIZE * SKILL_GRID_SIZE }, (_, index) => {
+      const cell = skillCellFromIndex(index)
+      if (!cell) throw new Error(`Invalid skill cell index: ${index}`)
+      const pathIndex = pathIndexByCell.get(index) ?? -1
       const isVisited = pathIndex >= 0
-      const isCurrent = row === current.row && col === current.col
-      const isStart = row === 3 && col === 0
-      const isAdjacent = Math.abs(row - current.row) + Math.abs(col - current.col) === 1
+      const isStart = index === SKILL_START_INDEX
+      const isAdjacentToSelected = skillPath.value.some(selectedCell => isAdjacentSkillCell(selectedCell, cell))
       let label = ''
       if (isStart) {
         label = '起'
       } else if (isVisited) {
-        label = String(pathIndex)
+        label = '✓'
       }
 
       return {
-        col,
+        col: cell.col,
         index,
-        isAvailable: isAdjacent && !isVisited,
-        isCurrent,
+        isAvailable: isAdjacentToSelected && !isVisited,
+        isCurrent: false,
         isStart,
         isVisited,
         label,
         pathIndex,
-        row,
+        row: cell.row,
       }
     })
   })
 
   const skillPathText = computed(() => {
-    const steps = skillPath.value.length - 1
-    return steps > 0 ? `已选择 ${steps} 步` : '从左下角开始'
+    const extraCells = skillPath.value.length - 1
+    return extraCells > 0 ? `已选择 ${extraCells} 个额外加点格，起点会自动加点` : '起点会自动加点，请选择额外技能格'
   })
 
   function skillCellColor (cell: SkillGridCell) {
@@ -413,34 +452,30 @@
     }
   }
 
-  async function setSkillDirs (directions: Direction[]) {
-    draft.skill_dirs = directions
+  async function setSkillCells (cells: number[]) {
+    draft.skill_cells = cells
     dirty.value = true
-    const data = await request<SkillDirsResponse>('/api/skill-dirs', {
+    const data = await request<SkillCellsResponse>('/api/skill-cells', {
       method: 'POST',
-      body: JSON.stringify({ directions }),
+      body: JSON.stringify({ cells }),
     })
-    draft.skill_dirs = data.skill_dirs
+    draft.skill_cells = data.skill_cells
     dirty.value = false
     await refresh()
   }
 
   async function selectSkillCell (cell: SkillGridCell) {
+    if (cell.isStart) return
+    if (cell.isVisited) {
+      await setSkillCells(selectedSkillCells.value.filter(index => index !== cell.index))
+      return
+    }
     if (!cell.isAvailable) return
-
-    const current = skillPath.value.at(-1) || { row: 3, col: 0 }
-    let direction: Direction | null = null
-    if (cell.row === current.row - 1 && cell.col === current.col) direction = 'up'
-    if (cell.row === current.row + 1 && cell.col === current.col) direction = 'down'
-    if (cell.row === current.row && cell.col === current.col - 1) direction = 'left'
-    if (cell.row === current.row && cell.col === current.col + 1) direction = 'right'
-
-    if (!direction) return
-    await setSkillDirs([...(draft.skill_dirs || []), direction])
+    await setSkillCells([...selectedSkillCells.value, cell.index])
   }
 
   async function clearSkill () {
-    await setSkillDirs([])
+    await setSkillCells([])
   }
 
   onMounted(() => {
@@ -705,8 +740,8 @@
                     :key="cell.index"
                     class="skill-cell"
                     :color="skillCellColor(cell)"
-                    :disabled="busy || (!cell.isAvailable && !cell.isVisited)"
-                    :ripple="cell.isAvailable"
+                    :disabled="busy || cell.isStart || (!cell.isAvailable && !cell.isVisited)"
+                    :ripple="cell.isAvailable || (cell.isVisited && !cell.isStart)"
                     :variant="skillCellVariant(cell)"
                     @click="selectSkillCell(cell)"
                   >

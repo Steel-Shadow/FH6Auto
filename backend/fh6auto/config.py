@@ -25,7 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "next_4": 1,
     "global_loops": 10,
     "global_loop_infinite": False,
-    "skill_dirs": ["right", "up", "up", "up", "left"],
+    "skill_cells": [0, 1, 5, 9, 13],
     "share_code": "659086805",
     "auto_restart": True,
     "restart_cmd": "start steam://run/2483190",

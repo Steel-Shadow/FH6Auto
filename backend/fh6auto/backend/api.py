@@ -32,8 +32,8 @@ class StartPipelineRequest(BaseModel):
     step: Literal["race", "buy", "mastery", "auto_wheelspin"]
 
 
-class SkillDirsRequest(BaseModel):
-    directions: list[Literal["up", "down", "left", "right"]]
+class SkillCellsRequest(BaseModel):
+    cells: list[int]
 
 
 class CalculateRequest(BaseModel):
@@ -102,10 +102,10 @@ def start_test_boot() -> dict[str, Any]:
     return {"started": True, "state": backend_app.snapshot()}
 
 
-@app.post("/api/skill-dirs")
-def set_skill_dirs(payload: SkillDirsRequest) -> dict[str, Any]:
-    backend_app.services.config.update({"skill_dirs": list(payload.directions)})
-    return {"skill_dirs": backend_app.services.config.values.get("skill_dirs", [])}
+@app.post("/api/skill-cells")
+def set_skill_cells(payload: SkillCellsRequest) -> dict[str, Any]:
+    backend_app.services.config.update({"skill_cells": list(payload.cells)})
+    return {"skill_cells": backend_app.services.config.values.get("skill_cells", [])}
 
 
 @app.post("/api/tools/calculate")
