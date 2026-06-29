@@ -126,6 +126,8 @@ class BuyCarFlow:
 
         pos_carcollection = self.image_waits.wait_for_image_sift(
             "carcollection.png",
+            min_inliers=30,
+            max_features=5000,
         )
         if not pos_carcollection:
             self.log("未找到车辆收集", level="warning")
