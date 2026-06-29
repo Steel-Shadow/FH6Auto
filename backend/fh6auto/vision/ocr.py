@@ -60,11 +60,7 @@ class OcrService(VisionTimingMixin):
         self._engine: RapidOCR | None = None
         self._read_count = 0
         self._reads_since_gc = 0
-        self._reads_since_recycle = 0
-        self._last_recycle_time = time.monotonic()
-        self._gc_read_interval = 200
-        self._recycle_read_interval = 1200
-        self._recycle_seconds = 30 * 60
+        self._gc_read_interval = 10
         self._ensure_engine()
 
     def _add_nvidia_dll_paths(self) -> list[str]:
@@ -167,8 +163,6 @@ class OcrService(VisionTimingMixin):
             self._engine = None
             self._providers = {}
             self._reads_since_gc = 0
-            self._reads_since_recycle = 0
-            self._last_recycle_time = time.monotonic()
 
         gc.collect()
         return True
@@ -180,30 +174,17 @@ class OcrService(VisionTimingMixin):
         normalized = re.sub(r"[，,。!！?？（）()\[\]【】]+", "", normalized)
         return normalized
 
-    def _mark_read_completed_locked(self) -> tuple[bool, bool]:
+    def _mark_read_completed_locked(self) -> bool:
         self._read_count += 1
         self._reads_since_gc += 1
-        self._reads_since_recycle += 1
-        now = time.monotonic()
 
         should_gc = self._reads_since_gc >= self._gc_read_interval
-        should_recycle = (
-            self._reads_since_recycle >= self._recycle_read_interval
-            or now - self._last_recycle_time >= self._recycle_seconds
-        )
-
         if should_gc:
             self._reads_since_gc = 0
-        if should_recycle:
-            self._engine = None
-            self._providers = {}
-            self._reads_since_recycle = 0
-            self._last_recycle_time = now
-        return should_gc, should_recycle
+        return should_gc
 
     def read(self, img: np.ndarray | str | Path, *, use_det=True, use_cls=True, text_score=0.5) -> list[OcrText]:
         should_gc = False
-        should_recycle = False
         started = time.perf_counter()
         with self._lock:
             engine = self._ensure_engine()
@@ -224,17 +205,11 @@ class OcrService(VisionTimingMixin):
                     box = tuple((float(x), float(y)) for x, y in boxes[idx])
                 output.append(OcrText(str(text), score, box))
 
-            should_gc, should_recycle = self._mark_read_completed_locked()
-            if should_recycle:
-                self.log(
-                    "OCR 引擎达到周期回收阈值，已释放当前会话，下次识别会重新初始化。",
-                    level="debug",
-                )
-                engine = None
+            should_gc = self._mark_read_completed_locked()
 
             del result, raw_texts, raw_scores, raw_boxes, texts, scores, boxes
 
-        if should_gc or should_recycle:
+        if should_gc:
             gc.collect()
             shape = ""
             if isinstance(img, np.ndarray) and img.ndim >= 2:
