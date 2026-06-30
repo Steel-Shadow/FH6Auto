@@ -206,10 +206,10 @@ class RecoveryService:
                 time.sleep(0.5)
                 return True
 
-            self.log(f"未在主菜单... ({i + 1}/60)")
+            self.log(f"未在主菜单... ({i + 1}/60)", level="debug")
             self.input_actions.hw_press("menu")
             # 给游戏一点动画加载时间
             time.sleep(1.0)
 
-        self.log("60 次尝试均未进入菜单，请检查游戏状态。")
+        self.log("60 次尝试均未进入菜单，请检查游戏状态。", level="warning")
         return False
