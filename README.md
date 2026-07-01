@@ -10,7 +10,17 @@
 
 ## TODO
 
-加点和删除一体化处理，减少翻页加快速度。
+对于多显示器场景，窗口定位会出问题，导致后续无法正常截图识别，相关代码如下：
+
+```python
+class GameWindowService:
+  # ...
+  def check_and_focus_game(self):
+    # ...
+    client_rect = win32gui.GetClientRect(hwnd)
+    pt = win32gui.ClientToScreen(hwnd, (0, 0))
+    # ...
+```
 
 修改抽奖逻辑，有不必要的OCR
 

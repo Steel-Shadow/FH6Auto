@@ -19,7 +19,7 @@ from ..vision.polling import ImageWaitsService
 
 
 class RaceFlow:
-    RACE_TIMEOUT_SECONDS = 150.0
+    RACE_TIMEOUT_SECONDS = 300.0
     RACE_CAR_TEMPLATE = "skillcar.png"
     RACE_CAR_FAVORITE_TAG = "liketag.png"
 
